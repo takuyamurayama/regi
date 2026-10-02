@@ -17,7 +17,7 @@ jobs:
     name: Quality and unit
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -66,7 +66,7 @@ jobs:
       PYTHON_EXECUTABLE: ${{ github.workspace }}/.context/venv311/bin/python
       JAPANESE_FONT: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -118,7 +118,7 @@ jobs:
     name: Docker build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build --tag regi:ci .
 
   terraform:
@@ -128,7 +128,7 @@ jobs:
       matrix:
         root: [infra, infra/sandbox]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.13.3
@@ -144,7 +144,7 @@ jobs:
     name: Source secrets
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install verified gitleaks
         env:
           GITLEAKS_VERSION: '8.30.1'
