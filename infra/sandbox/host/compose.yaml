@@ -4,50 +4,50 @@ services:
     image: postgres:17
     restart: unless-stopped
     env_file: db.env
-    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=40"]
+    command: ['postgres', '-c', 'shared_buffers=64MB', '-c', 'max_connections=40']
     mem_limit: 384m
-    volumes: ["/var/lib/regi/postgres:/var/lib/postgresql/data"]
+    volumes: ['/var/lib/regi/postgres:/var/lib/postgresql/data']
     networks: [database]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U regi_owner -d regi"]
+      test: ['CMD-SHELL', 'pg_isready -U regi_owner -d regi']
       interval: 5s
       retries: 30
     logging: &logging
       driver: json-file
-      options: {max-size: "10m", max-file: "3"}
+      options: { max-size: '10m', max-file: '3' }
   api:
     image: regi:sandbox
     restart: unless-stopped
     env_file: app.env
-    ports: ["3000:3000"]
+    ports: ['3000:3000']
     mem_limit: 512m
-    volumes: ["/var/lib/regi/workload:/run/regi-aws:ro"]
+    volumes: ['/var/lib/regi/workload:/run/regi-aws:ro']
     networks: [database, outbound]
     depends_on:
-      db: {condition: service_healthy}
+      db: { condition: service_healthy }
     logging: *logging
   worker:
     image: regi:sandbox
     restart: unless-stopped
     env_file: app.env
     environment:
-      DAILY_JOBS: "true"
-    command: ["node", "apps/api/dist/apps/api/src/worker.js"]
+      DAILY_JOBS: 'true'
+    command: ['node', 'apps/api/dist/apps/api/src/worker.js']
     mem_limit: 768m
-    volumes: ["/var/lib/regi/workload:/run/regi-aws:ro"]
+    volumes: ['/var/lib/regi/workload:/run/regi-aws:ro']
     networks: [database, outbound]
     depends_on:
-      db: {condition: service_healthy}
+      db: { condition: service_healthy }
     logging: *logging
   maintenance:
     image: regi:sandbox
     profiles: [maintenance]
     env_file: maintenance.env
     mem_limit: 512m
-    volumes: ["/var/lib/regi/private:/run/regi-private:ro"]
+    volumes: ['/var/lib/regi/private:/run/regi-private:ro']
     networks: [database]
     depends_on:
-      db: {condition: service_healthy}
+      db: { condition: service_healthy }
 networks:
-  database: {internal: true}
+  database: { internal: true }
   outbound: {}
