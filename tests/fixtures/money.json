@@ -1,0 +1,7 @@
+[
+ {"name":"税込複数税率・会計配分","mode":"inclusive","discount":"1","lines":[{"productId":"a","name":"A","quantity":2,"price":"108","discount":"0","rateBps":800,"cost":"40","stockManaged":true},{"productId":"b","name":"B","quantity":1,"price":"110","discount":"0","rateBps":1000,"cost":"40","stockManaged":true}],"total":"325","paid":["215","110"],"tax":["15","10"]},
+ {"name":"税抜・税率ごと切捨て","mode":"exclusive","discount":"1","lines":[{"productId":"a","name":"A","quantity":2,"price":"101","discount":"0","rateBps":800,"cost":"0","stockManaged":true},{"productId":"b","name":"B","quantity":1,"price":"101","discount":"0","rateBps":1000,"cost":"0","stockManaged":true}],"total":"328","paid":["217","111"],"tax":["16","10"]},
+ {"name":"全額値引き","mode":"inclusive","discount":"30","lines":[{"productId":"a","name":"A","quantity":3,"price":"10","discount":"0","rateBps":1000,"cost":"0","stockManaged":true}],"total":"0","paid":["0"],"tax":["0"]},
+ {"name":"同順位表示順・返金端数","mode":"inclusive","discount":"1","lines":[{"productId":"a","name":"A","quantity":2,"price":"1","discount":"0","rateBps":1000,"cost":"0","stockManaged":true},{"productId":"b","name":"B","quantity":2,"price":"1","discount":"0","rateBps":1000,"cost":"0","stockManaged":true}],"total":"3","paid":["1","2"],"tax":["0"]}
+ ,{"name":"JSON安全整数を超える金額","mode":"inclusive","discount":"1","lines":[{"productId":"a","name":"A","quantity":2,"price":"9007199254740993","discount":"0","rateBps":1000,"cost":"0","stockManaged":true}],"total":"18014398509481985","paid":["18014398509481985"],"tax":["1637672591771089"]}
+]

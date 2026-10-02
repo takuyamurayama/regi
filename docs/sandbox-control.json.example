@@ -1,0 +1,7 @@
+{
+  "aws_profile": "takuya",
+  "expected_account_id": "000000000000",
+  "region": "ap-northeast-1",
+  "instance_id": "i-00000000000000000",
+  "web_url": "https://replacewithrealdistribution.cloudfront.net"
+}

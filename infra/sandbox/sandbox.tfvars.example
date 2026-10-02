@@ -1,0 +1,13 @@
+name                = "regi-personal"
+expected_account_id = "000000000000"
+alert_email         = "replace-with-approved-email@example.invalid"
+monthly_budget_usd  = 30
+require_mfa         = true
+bootstrap_bucket    = "replace-with-confirmed-private-bootstrap-bucket"
+image_sha256        = ""
+demo = {
+  enabled               = false
+  tenant_id             = ""
+  administrator_subject = ""
+  end_day               = ""
+}

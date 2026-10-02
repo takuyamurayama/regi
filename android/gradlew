@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -x "$ROOT/.context/gradle-8.11.1/bin/gradle" ]; then exec "$ROOT/.context/gradle-8.11.1/bin/gradle" -p "$ROOT/android" "$@"; fi
+if [ -n "${GRADLE_HOME:-}" ]; then exec "$GRADLE_HOME/bin/gradle" -p "$ROOT/android" "$@"; fi
+exec gradle -p "$ROOT/android" "$@"

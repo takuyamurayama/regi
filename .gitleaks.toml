@@ -1,0 +1,17 @@
+title = "REGI source secret scan"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Local secrets and generated dependencies are never part of the source commit"
+paths = [
+  '''(^|/)\.context/''',
+  '''(^|/)\.private/''',
+  '''(^|/)\.aws/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.terraform/''',
+  '''(^|/)(dist|build|\.gradle)/''',
+  '''(^|/)\.env($|\.(local|development|production|test)($|\.))''',
+  '''\.(tfvars|tfvars\.json|tfstate.*|tfplan.*|pem|key|p12|pfx|jks|keystore|pin)$''',
+]

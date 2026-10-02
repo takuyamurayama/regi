@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+cat > /etc/systemd/system/regi-autostop.service <<'UNIT'
+[Unit]
+Description=Stop the personal REGI sandbox after two hours
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/shutdown -h now
+UNIT
+cat > /etc/systemd/system/regi-autostop.timer <<'UNIT'
+[Unit]
+Description=Two-hour REGI sandbox safety timer
+[Timer]
+OnActiveSec=2h
+AccuracySec=30s
+Unit=regi-autostop.service
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now regi-autostop.timer
+dnf install -y docker python3 awscli-2
+systemctl enable --now amazon-ssm-agent
+mkdir -p /opt/regi /var/lib/regi
+device="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${replace(volume_id, "-", "")}"
+for attempt in $(seq 1 180); do
+  if [ -b "$device" ]; then break; fi
+  sleep 5
+done
+test -b "$device"
+filesystem=$(blkid -s TYPE -o value "$device" || true)
+if [ -z "$filesystem" ]; then
+  approval=/opt/regi/initialize-data-volume.approval
+  test -f "$approval"
+  test ! -L "$approval"
+  test "$(stat -c '%u:%a' "$approval")" = '0:600'
+  test "$(cat "$approval")" = '${volume_id}'
+  wipefs --no-act --json "$device" | python3 -c 'import json,sys; assert json.load(sys.stdin).get("signatures") == [], "Existing disk signature"'
+  lsblk --json --output TYPE,FSTYPE,MOUNTPOINT "$device" | python3 -c 'import json,sys; disks=json.load(sys.stdin)["blockdevices"]; assert len(disks)==1 and disks[0]["type"]=="disk" and not disks[0].get("fstype") and not disks[0].get("mountpoint") and not disks[0].get("children"), "Existing partition, filesystem or mount"'
+  if findmnt --noheadings --source "$device" >/dev/null; then exit 1; fi
+  rm "$approval"
+  mkfs.ext4 "$device"
+elif [ "$filesystem" != "ext4" ]; then
+  printf 'Refusing an unknown data filesystem\n' >&2
+  exit 1
+fi
+uuid=$(blkid -s UUID -o value "$device")
+if ! findmnt --fstab --noheadings --target /var/lib/regi >/dev/null; then
+  printf 'UUID=%s /var/lib/regi ext4 defaults,nofail 0 2\n' "$uuid" >> /etc/fstab
+fi
+mount /var/lib/regi
+mountpoint -q /var/lib/regi
+mkdir -p /var/lib/regi/docker /var/lib/regi/private /var/lib/regi/workload /etc/docker /etc/systemd/system/docker.service.d
+printf '{"data-root":"/var/lib/regi/docker"}\n' > /etc/docker/daemon.json
+printf '[Unit]\nRequiresMountsFor=/var/lib/regi\n' > /etc/systemd/system/docker.service.d/regi.conf
+cat > /opt/regi/host.json <<'JSON'
+{"region":"ap-northeast-1","bucket":"${bucket}","name":"${name}","runtimePath":"${runtime_path}","secretArn":"${secret_arn}"}
+JSON
+for file in bootstrap.sh bootstrap.py credentials.py compose.yaml; do
+  aws s3 cp "s3://${bucket}/releases/${name}/bootstrap/$file" "/opt/regi/$file" --region ap-northeast-1 --only-show-errors
+done
+chmod 700 /opt/regi/bootstrap.sh
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl --fail --silent --show-error --location https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose-linux-x86_64
+curl --fail --silent --show-error --location https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-x86_64.sha256 -o /tmp/regi-compose.sha256
+(cd /usr/local/lib/docker/cli-plugins && sha256sum -c /tmp/regi-compose.sha256)
+mv /usr/local/lib/docker/cli-plugins/docker-compose-linux-x86_64 /usr/local/lib/docker/cli-plugins/docker-compose
+chmod 755 /usr/local/lib/docker/cli-plugins/docker-compose
+cat > /etc/systemd/system/regi-credentials.service <<'UNIT'
+[Unit]
+Description=Refresh limited REGI workload identity
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/regi/credentials.py
+UNIT
+cat > /etc/systemd/system/regi-credentials.timer <<'UNIT'
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+[Install]
+WantedBy=timers.target
+UNIT
+cat > /etc/systemd/system/regi.service <<'UNIT'
+[Unit]
+Description=Private REGI sandbox containers
+Requires=docker.service
+After=docker.service network-online.target
+RequiresMountsFor=/var/lib/regi
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/regi
+ExecStart=/opt/regi/bootstrap.sh
+ExecStop=/usr/bin/docker compose -f /opt/regi/compose.yaml stop -t 45
+TimeoutStartSec=6600
+TimeoutStopSec=90
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now docker regi-autostop.timer regi-credentials.timer
+systemctl enable regi.service
+systemctl start --no-block regi.service
