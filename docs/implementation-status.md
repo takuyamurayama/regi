@@ -470,3 +470,11 @@ Bedrock生成AIは無効で、実LightGBM予測98行は保持。本番のMFA/Mul
 - 個人AWSのAPI/ワーカーをイメージ `sha256:3e1f568cd44b6087ed2cb71c60562d6d323c250df84e54a0e340fbbd63de648c` へ更新。配布アーカイブSHA-256は `cad33ca77982a9e3e790c19ab782ce7765eab8d6d3f64358714256a56fb3587b`。Terraformはruntimeパラメーター1件のみ更新、EC2・DBは再作成/再起動せず、Web・認証・自動停止タイマーも変更していない。
 - 実SQSワーカーで領収書 `57d6bfed-1534-45fc-be1b-6e771e83e517`、発注書 `693cefd9-961c-4d1c-b2a6-84a506ec0036`、返還伝票 `4d5a1d1e-1c93-4928-b69e-2e2a2fb89d17` がcompletedとなり、Artifacts.downloadで実S3から取得できた。暗号化・SHA-256一致を確認して実ファイルも目視検査。旧PDF2件のSHA-256は不変。売上504件・返品4件・発注6件・締め168件・在庫台帳3,550件の件数と内容チェックサムが更新前後で一致した。追加したのは出力ジョブのみ。
 - health200、未認証PDF取得401を確認。Mac証拠は `logs/pdf-layout-before.json`、`pdf-layout-after.json`、`pdf-layout-deploy.json`。本人のブラウザーでの操作や実機プリンターの検証を代替するものではない。自動停止は従来どおり2026-10-02 06:27:16 UTC（15:27:16 JST）。
+
+## D0 第1週の基盤整備（2026-10-02・ローカル検証）
+
+初回コミットを秘密scan0件で作成し、Prettier（幅100）とKotlin整形を挙動変更のない別コミットへ分離した。ESLint9 recommended-type-checkedは既存ファイル・ルール別警告上限を固定し、追加警告を拒否する。Node/Webの名前manifestと実行結果を照合し、skip/TODOも不合格とする。DB不要18件・実PG53件へ分離した。
+
+CI、Dependabot、Playwright webServer、Node版指定、公式Gradle8.11.1 wrapper、digest固定multi-stage Docker（production依存、Python独立stage、非root、healthcheck）を追加。保守migration/seedの実行経路を保持した。
+
+ローカルでNode71件（Node22でも分離18/53）、Android JVM3件・接続8件、forecast Python5件、host Python6件、Docker build/API healthy/保守import、日本語PDFを含む統合試験、両Terraform fmt/validate・sandbox mock6件、npm audit0件とCI構文検査を確認した。ブラウザー20件のwebServer起動回帰も合格し、端末強制停止後の別プロセス再開・二重売上なしを確認した。AWSへの適用・配備は今回実施しない。main保護・PRフローはGitHubでの確認待ち。ユーザーが追加承認したpushはD0の検証・修正後に実施する。

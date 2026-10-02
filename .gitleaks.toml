@@ -11,7 +11,7 @@ paths = [
   '''(^|/)\.aws/''',
   '''(^|/)node_modules/''',
   '''(^|/)\.terraform/''',
-  '''(^|/)(dist|build|\.gradle)/''',
+  '''(^|/)(dist|build|\.gradle|\.kotlin)/''',
   '''(^|/)\.env($|\.(local|development|production|test)($|\.))''',
   '''\.(tfvars|tfvars\.json|tfstate.*|tfplan.*|pem|key|p12|pfx|jks|keystore|pin)$''',
 ]

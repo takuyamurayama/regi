@@ -30,6 +30,7 @@ dist/
 __pycache__/
 .venv/
 .gradle/
+.kotlin/
 build/
 local.properties
 .terraform/

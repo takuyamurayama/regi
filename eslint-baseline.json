@@ -1,0 +1,317 @@
+{
+  "apps/api/src/admin-authentication.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 1
+  },
+  "apps/api/src/admin.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unsafe-return": 1,
+    "@typescript-eslint/no-unsafe-assignment": 7,
+    "@typescript-eslint/no-unsafe-member-access": 6,
+    "@typescript-eslint/no-unsafe-argument": 2
+  },
+  "apps/api/src/ai-plan.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unsafe-assignment": 10,
+    "@typescript-eslint/no-unsafe-call": 5,
+    "@typescript-eslint/no-unsafe-member-access": 12,
+    "@typescript-eslint/no-unsafe-argument": 22
+  },
+  "apps/api/src/ai.ts": {
+    "@typescript-eslint/no-unused-vars": 1,
+    "@typescript-eslint/no-explicit-any": 3,
+    "@typescript-eslint/no-unsafe-member-access": 54,
+    "@typescript-eslint/no-unsafe-argument": 24,
+    "@typescript-eslint/no-unsafe-assignment": 21,
+    "@typescript-eslint/no-unsafe-return": 6,
+    "@typescript-eslint/no-unsafe-call": 1
+  },
+  "apps/api/src/artifacts.ts": {
+    "@typescript-eslint/no-base-to-string": 1,
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unsafe-argument": 14,
+    "@typescript-eslint/no-unsafe-member-access": 55,
+    "@typescript-eslint/no-unsafe-assignment": 13,
+    "@typescript-eslint/no-unsafe-return": 3
+  },
+  "apps/api/src/auth.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 13,
+    "@typescript-eslint/no-unsafe-member-access": 27,
+    "@typescript-eslint/no-unsafe-argument": 7,
+    "@typescript-eslint/no-unsafe-call": 3,
+    "@typescript-eslint/no-unsafe-return": 1
+  },
+  "apps/api/src/controller.ts": {
+    "@typescript-eslint/no-unused-vars": 1,
+    "@typescript-eslint/no-explicit-any": 70,
+    "@typescript-eslint/no-unsafe-argument": 42,
+    "@typescript-eslint/no-unsafe-member-access": 45,
+    "@typescript-eslint/no-unsafe-assignment": 1,
+    "@typescript-eslint/no-misused-promises": 1,
+    "@typescript-eslint/no-unsafe-return": 1,
+    "@typescript-eslint/no-unsafe-call": 3
+  },
+  "apps/api/src/db.ts": {
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unsafe-member-access": 3
+  },
+  "apps/api/src/errors.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unsafe-member-access": 7,
+    "@typescript-eslint/no-unsafe-call": 2,
+    "@typescript-eslint/no-unsafe-assignment": 4
+  },
+  "apps/api/src/import.ts": {
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unsafe-argument": 1,
+    "@typescript-eslint/no-unsafe-member-access": 2,
+    "@typescript-eslint/no-unsafe-return": 1,
+    "@typescript-eslint/no-unsafe-assignment": 2
+  },
+  "apps/api/src/main.ts": {
+    "@typescript-eslint/no-unsafe-call": 1,
+    "@typescript-eslint/no-unsafe-member-access": 1,
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unsafe-return": 1
+  },
+  "apps/api/src/openapi.ts": {
+    "@typescript-eslint/no-explicit-any": 28,
+    "@typescript-eslint/no-unsafe-argument": 1,
+    "@typescript-eslint/no-unsafe-assignment": 28,
+    "@typescript-eslint/no-unnecessary-type-assertion": 27
+  },
+  "apps/api/src/pdf.ts": {
+    "@typescript-eslint/no-explicit-any": 3,
+    "@typescript-eslint/no-base-to-string": 1,
+    "@typescript-eslint/no-unsafe-member-access": 64,
+    "@typescript-eslint/no-unsafe-assignment": 6,
+    "@typescript-eslint/no-unsafe-call": 2,
+    "@typescript-eslint/no-unsafe-argument": 22
+  },
+  "apps/api/src/receipt-profile.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 5,
+    "@typescript-eslint/no-unsafe-return": 1,
+    "@typescript-eslint/no-unsafe-member-access": 3
+  },
+  "apps/api/src/recommendations.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unsafe-argument": 6,
+    "@typescript-eslint/no-unsafe-member-access": 35,
+    "@typescript-eslint/no-unsafe-return": 3,
+    "@typescript-eslint/no-unsafe-assignment": 16
+  },
+  "apps/api/src/service.ts": {
+    "@typescript-eslint/no-explicit-any": 41,
+    "@typescript-eslint/no-unsafe-argument": 101,
+    "@typescript-eslint/no-unsafe-member-access": 386,
+    "@typescript-eslint/no-unsafe-return": 54,
+    "@typescript-eslint/no-unsafe-assignment": 143,
+    "@typescript-eslint/no-unnecessary-type-assertion": 2,
+    "@typescript-eslint/no-unsafe-call": 27
+  },
+  "apps/api/src/worker.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 14,
+    "@typescript-eslint/no-unsafe-member-access": 14,
+    "@typescript-eslint/no-unsafe-argument": 4,
+    "@typescript-eslint/no-explicit-any": 2
+  },
+  "apps/web/src/Dashboard.tsx": {
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unsafe-member-access": 10,
+    "@typescript-eslint/no-unsafe-argument": 2,
+    "@typescript-eslint/no-unsafe-call": 1
+  },
+  "apps/web/src/Table.tsx": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "apps/web/src/api-response.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unsafe-assignment": 1,
+    "no-empty": 1,
+    "@typescript-eslint/no-unsafe-member-access": 5,
+    "@typescript-eslint/no-unsafe-return": 1
+  },
+  "apps/web/src/auth.ts": {
+    "@typescript-eslint/restrict-plus-operands": 1,
+    "@typescript-eslint/no-unsafe-assignment": 8,
+    "@typescript-eslint/no-unsafe-member-access": 15,
+    "@typescript-eslint/no-unsafe-argument": 2
+  },
+  "apps/web/src/main.tsx": {
+    "@typescript-eslint/no-unused-vars": 3,
+    "@typescript-eslint/no-unsafe-argument": 32,
+    "@typescript-eslint/no-unsafe-assignment": 54,
+    "@typescript-eslint/no-explicit-any": 30,
+    "@typescript-eslint/no-unsafe-member-access": 164,
+    "@typescript-eslint/no-unsafe-return": 12,
+    "@typescript-eslint/no-misused-promises": 24,
+    "@typescript-eslint/no-unsafe-call": 12,
+    "@typescript-eslint/no-floating-promises": 1
+  },
+  "apps/web/src/presentation.ts": {
+    "@typescript-eslint/no-base-to-string": 1
+  },
+  "apps/web/src/workflows.tsx": {
+    "@typescript-eslint/no-explicit-any": 27,
+    "@typescript-eslint/no-unsafe-assignment": 30,
+    "@typescript-eslint/no-unsafe-argument": 10,
+    "@typescript-eslint/no-floating-promises": 1,
+    "@typescript-eslint/no-misused-promises": 21,
+    "@typescript-eslint/no-unsafe-member-access": 137,
+    "@typescript-eslint/no-unsafe-call": 11,
+    "@typescript-eslint/no-unsafe-return": 1
+  },
+  "scripts/android-fixture.ts": {
+    "@typescript-eslint/no-unsafe-member-access": 1
+  },
+  "scripts/load-test.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 3,
+    "@typescript-eslint/no-unsafe-member-access": 3,
+    "@typescript-eslint/no-unnecessary-type-assertion": 1,
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "scripts/migrate.ts": {
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "scripts/restore-test.ts": {
+    "@typescript-eslint/no-explicit-any": 1,
+    "@typescript-eslint/no-unsafe-member-access": 1
+  },
+  "scripts/retention.ts": {
+    "@typescript-eslint/no-explicit-any": 3,
+    "@typescript-eslint/no-unsafe-argument": 1,
+    "@typescript-eslint/no-unsafe-member-access": 5,
+    "@typescript-eslint/no-unsafe-assignment": 1
+  },
+  "scripts/sandbox-db-role.ts": {
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unsafe-argument": 1,
+    "@typescript-eslint/no-unsafe-member-access": 1
+  },
+  "scripts/sandbox-seed.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 12,
+    "@typescript-eslint/no-unsafe-member-access": 12,
+    "@typescript-eslint/no-unsafe-call": 1,
+    "@typescript-eslint/no-unsafe-argument": 6
+  },
+  "tests/ai-plan.test.ts": {
+    "@typescript-eslint/no-floating-promises": 1
+  },
+  "tests/api-response.test.ts": {
+    "@typescript-eslint/no-floating-promises": 2
+  },
+  "tests/artifacts.test.ts": {
+    "@typescript-eslint/no-floating-promises": 7
+  },
+  "tests/auth-web.test.ts": {
+    "@typescript-eslint/no-floating-promises": 1,
+    "@typescript-eslint/no-base-to-string": 1
+  },
+  "tests/browser/ai.spec.ts": {
+    "@typescript-eslint/no-unsafe-return": 1,
+    "@typescript-eslint/no-unsafe-member-access": 1,
+    "@typescript-eslint/no-unsafe-assignment": 1
+  },
+  "tests/browser/auth.spec.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 5,
+    "@typescript-eslint/no-unsafe-call": 6,
+    "@typescript-eslint/no-unsafe-argument": 1,
+    "@typescript-eslint/no-unsafe-member-access": 5,
+    "@typescript-eslint/restrict-plus-operands": 1
+  },
+  "tests/browser/design.spec.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 25,
+    "@typescript-eslint/no-unsafe-member-access": 22,
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unsafe-return": 2,
+    "@typescript-eslint/no-unsafe-argument": 4,
+    "@typescript-eslint/no-unsafe-call": 1
+  },
+  "tests/browser/exports.spec.ts": {
+    "@typescript-eslint/no-unnecessary-type-assertion": 2,
+    "@typescript-eslint/no-unsafe-member-access": 1
+  },
+  "tests/browser/operations.spec.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 22,
+    "@typescript-eslint/no-unsafe-member-access": 24,
+    "@typescript-eslint/no-unnecessary-type-assertion": 1,
+    "@typescript-eslint/no-explicit-any": 5,
+    "@typescript-eslint/no-unsafe-return": 2,
+    "@typescript-eslint/no-unsafe-call": 4,
+    "@typescript-eslint/no-unsafe-argument": 1
+  },
+  "tests/browser/sandbox.spec.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 6,
+    "@typescript-eslint/no-unsafe-member-access": 11,
+    "@typescript-eslint/no-unsafe-argument": 5
+  },
+  "tests/browser/stocktake.spec.ts": {
+    "@typescript-eslint/no-unsafe-assignment": 27,
+    "@typescript-eslint/no-unsafe-member-access": 27,
+    "@typescript-eslint/no-explicit-any": 3,
+    "@typescript-eslint/no-unsafe-return": 1,
+    "@typescript-eslint/no-unsafe-argument": 2,
+    "@typescript-eslint/no-unsafe-call": 2
+  },
+  "tests/core.test.ts": {
+    "@typescript-eslint/no-floating-promises": 6,
+    "@typescript-eslint/no-unsafe-argument": 1,
+    "@typescript-eslint/no-explicit-any": 1
+  },
+  "tests/db.test.ts": {
+    "@typescript-eslint/no-floating-promises": 1,
+    "@typescript-eslint/no-unsafe-assignment": 18,
+    "@typescript-eslint/no-unsafe-member-access": 61,
+    "@typescript-eslint/no-unsafe-argument": 16,
+    "@typescript-eslint/no-explicit-any": 3
+  },
+  "tests/forecast-db.test.ts": {
+    "@typescript-eslint/no-floating-promises": 1,
+    "@typescript-eslint/no-unsafe-assignment": 1,
+    "@typescript-eslint/no-unsafe-member-access": 6
+  },
+  "tests/presentation.test.ts": {
+    "@typescript-eslint/no-floating-promises": 3
+  },
+  "tests/report-period.test.ts": {
+    "@typescript-eslint/no-floating-promises": 1
+  },
+  "tests/retention.test.ts": {
+    "@typescript-eslint/no-floating-promises": 1,
+    "@typescript-eslint/no-explicit-any": 2,
+    "@typescript-eslint/no-unsafe-member-access": 2
+  },
+  "tests/review.test.ts": {
+    "@typescript-eslint/no-floating-promises": 1,
+    "@typescript-eslint/no-unsafe-assignment": 16,
+    "@typescript-eslint/no-unsafe-member-access": 54,
+    "@typescript-eslint/no-unsafe-argument": 19,
+    "@typescript-eslint/no-unsafe-call": 2,
+    "@typescript-eslint/no-explicit-any": 6,
+    "@typescript-eslint/no-unsafe-return": 4,
+    "@typescript-eslint/require-await": 1
+  },
+  "tests/sandbox-mfa.test.ts": {
+    "@typescript-eslint/no-unsafe-argument": 1,
+    "@typescript-eslint/no-explicit-any": 3,
+    "@typescript-eslint/no-unsafe-member-access": 5,
+    "@typescript-eslint/no-floating-promises": 4,
+    "@typescript-eslint/no-unsafe-assignment": 1
+  },
+  "tests/sandbox-tooling.test.ts": {
+    "@typescript-eslint/no-floating-promises": 8,
+    "@typescript-eslint/no-explicit-any": 4,
+    "@typescript-eslint/no-unsafe-argument": 3,
+    "@typescript-eslint/no-unsafe-member-access": 4,
+    "@typescript-eslint/no-unsafe-assignment": 1,
+    "@typescript-eslint/no-unsafe-call": 1
+  },
+  "tests/sandbox.test.ts": {
+    "@typescript-eslint/no-floating-promises": 6,
+    "@typescript-eslint/no-unsafe-return": 2,
+    "@typescript-eslint/no-unsafe-member-access": 44,
+    "@typescript-eslint/no-unsafe-assignment": 5,
+    "@typescript-eslint/no-unsafe-argument": 6,
+    "@typescript-eslint/no-unsafe-call": 8,
+    "@typescript-eslint/no-explicit-any": 2
+  }
+}

@@ -17,6 +17,7 @@ services:
       retries: 20
   migrate:
     build: .
+    healthcheck: { disable: true }
     command: ['npm', 'run', 'db:migrate']
     environment:
       DATABASE_URL: postgresql://regi_app:local-regi-only@db:5432/regi
@@ -35,6 +36,7 @@ services:
       migrate: { condition: service_completed_successfully }
   worker:
     build: .
+    healthcheck: { disable: true }
     command: ['node', 'apps/api/dist/apps/api/src/worker.js']
     environment:
       <<: *api_environment

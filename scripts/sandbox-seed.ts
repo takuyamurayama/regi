@@ -348,7 +348,7 @@ export async function seedSandbox(
             sql`INSERT INTO device_leases(id,tenant_id,store_id,device_id,issued_at,auth_until,contract_until,price_mode,receipt) VALUES(${leaseId}::uuid,${tenantId}::uuid,${storeId}::uuid,${deviceId}::uuid,${new Date(Date.parse(day + 'T00:00:00Z') - 3600000)},${new Date(Date.parse(day + 'T00:00:00Z') + 23 * 3600000)},${contractEnd},'inclusive',${json(profile.body)}::jsonb)`,
           );
         }
-        const eventBase = { deviceId, leaseId, staffId, ruleVersion: RULE_VERSION };
+        const eventBase = { deviceId, leaseId, staffId, ruleVersion: RULE_VERSION } as const;
         await business.terminalEvent(transaction, actor, {
           ...eventBase,
           id: shiftId,

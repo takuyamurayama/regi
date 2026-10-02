@@ -1,0 +1,91 @@
+tests/ai-plan.test.ts	Japanese natural-language periods use business dates and reject future actuals
+tests/api-response.test.ts	CloudFront HTML errors show cause and recovery instructions, never raw HTML or JSON parse errors
+tests/api-response.test.ts	business error messages retain next actions; general network failure does not assert the server is stopped
+tests/artifacts.test.ts	500明細でも全商品を一度ずつ出力し、各ページに表見出しとページ番号を付ける
+tests/artifacts.test.ts	宛名必須の適格請求書・日本時間の日付繰越・大きな整数金額を保持する
+tests/artifacts.test.ts	発注書は発行時点の数量・単価・仕入先を使い、未保存の税率を創作しない
+tests/artifacts.test.ts	税抜・全額値引き・将来税率でも税額は保存内容から表示する
+tests/artifacts.test.ts	返還伝票は元販売日・返還日・元の適用税率と部分返金額だけを出力する
+tests/artifacts.test.ts	長い宛名・住所・改行を含む巨大明細を省略せずページ内へ折り返す
+tests/artifacts.test.ts	飲食店領収書のPDFに保存済み税率・値引き・支払・JST日時を整えて出力する
+tests/auth-web.test.ts	browser PKCE rejects mismatched and expired state, refreshes once and clears logout
+tests/browser/ai.spec.ts	AI shows JST quota, returns failed connection quota and keeps sales usable
+tests/browser/auth.spec.ts	ブラウザー標準fetchでPKCEのコード交換と並列トークン更新が成功する
+tests/browser/design.spec.ts	キーボードでメイン・ナビ・出力履歴へアクセスし動きを抑制できる
+tests/browser/design.spec.ts	スマホ・タブレット・デスクトップで全9画面を横崩れなく操作できる
+tests/browser/design.spec.ts	支払比率と金額は実PostgreSQLの確定取引に一致する
+tests/browser/design.spec.ts	読み込み中の金額と比率を売上ゼロとして表示しない
+tests/browser/exports.spec.ts	CSV・保存帳票一式を作成も完了を自動表示して保存できる
+tests/browser/exports.spec.ts	PDF作成後に履歴を開き、遅い作成の完了を自動確認して保存できる
+tests/browser/exports.spec.ts	取引CSVを作成も完了を自動表示して保存できる
+tests/browser/guild.spec.ts	白いモダン画面は光るAI装飾なしで実際の予測画面へ遷移する
+tests/browser/guild.spec.ts	白基調の画面で金額・説明・フォーム・実APIエラーを読める
+tests/browser/operations.spec.ts	ダッシュボード画面を保存
+tests/browser/operations.spec.ts	二明細発注で第二明細だけ分納し、二明細売上の第二明細を返品する
+tests/browser/operations.spec.ts	商品登録 → 発注承認 → 発行 → 分納入荷 → 在庫表示
+tests/browser/operations.spec.ts	担当外店舗・レジ担当の管理操作は拒否
+tests/browser/retro.spec.ts	ショートカットの4操作はキーボードで既存の業務画面へ進む
+tests/browser/retro.spec.ts	白背景・細い単線枠と通常フォントで業務メニューを表示する
+tests/browser/sandbox.spec.ts	HTML504は生の解析エラーでなく、起動待ちと再読み込みの案内を表示する
+tests/browser/sandbox.spec.ts	架空データを明示し、今日のゼロ売上から84日間の実デモ集計と予測へ進める
+tests/browser/stocktake.spec.ts	棚卸の複数実査・隔離承認・遅延売上再照合を画面で完結
+tests/core.test.ts	10000 seeded monetary conservation cases
+tests/core.test.ts	CSV formulas neutralized and quotes escaped
+tests/core.test.ts	CSV handles BOM, commas, quotes and CRLF
+tests/core.test.ts	JSON安全整数を超える金額
+tests/core.test.ts	JST 05:00 day boundary and exact offline deadline
+tests/core.test.ts	strict amount and invalid discount rejected
+tests/core.test.ts	全額値引き
+tests/core.test.ts	同順位表示順・返金端数
+tests/core.test.ts	税抜・税率ごと切捨て
+tests/core.test.ts	税込複数税率・会計配分
+tests/db.test.ts	AI quota rollback on disconnected Bedrock; unauthorized stores denied
+tests/db.test.ts	CSV import is atomic and scheduled prices bootstrap offline
+tests/db.test.ts	app role cannot bypass RLS; tenant and store isolation
+tests/db.test.ts	cash refund reduces the paying shift and full refund restores gross profit
+tests/db.test.ts	concurrent resend counts one sale and one stock reduction
+tests/db.test.ts	expired contract still accepts previously valid sales but refuses new business
+tests/db.test.ts	explicit annual renewal and organization limits are enforced
+tests/db.test.ts	invalid raw event retains original hash, stable review and no monetary effects
+tests/db.test.ts	offline open/sale/close recover from out-of-order delivery
+tests/db.test.ts	partial refunds exactly exhaust original total without over-refund
+tests/db.test.ts	purchase approval, issue, partial receipts and concurrent over-receipt
+tests/db.test.ts	real PostgreSQL transactional acceptance
+tests/db.test.ts	receipt cancellation appends reversing ledger; cannot cancel twice
+tests/db.test.ts	reorder fallback uses configured base stock and order unit rounding
+tests/db.test.ts	reserved quantities and unknown refunds remain locked
+tests/db.test.ts	stocktake requires stopped synchronized devices and writes only deltas
+tests/db.test.ts	transfer excludes in-transit stock until receiving
+tests/forecast-db.test.ts	real PostgreSQL forecast reads only complete days, persists seven days and rejects another store
+tests/presentation.test.ts	payment proportions retain integer precision beyond Number.MAX_SAFE_INTEGER
+tests/presentation.test.ts	payment shares reflect actual totals, including zero and absent methods
+tests/presentation.test.ts	yen display preserves integer amounts, negative amounts and grouping
+tests/report-period.test.ts	optional demo Web build selects seven real historical days after the Cognito callback returns to root
+tests/retention.test.ts	retention dry run, expiry guard and owner deletion preserve RLS and immutable triggers
+tests/review.test.ts	PIN cashier downscopes old administrator token and cannot elevate cashier token
+tests/review.test.ts	URL target is part of operation identity for approval receipt refund and close
+tests/review.test.ts	dine-in and takeaway use effective configured tax histories
+tests/review.test.ts	question changes safe aggregate plan; comparison shortage and quota recovery
+tests/review.test.ts	receipt profile snapshot uses confirmed time, original tax rates and seller registration
+tests/review.test.ts	recoverable export ownership and CSV plus immutable PDF bundle
+tests/review.test.ts	renewed leases retain old leases and old event recovery
+tests/review.test.ts	review regression against real PostgreSQL
+tests/review.test.ts	server stocktake lock blocks two terminals and preserves delayed sale reconciliation
+tests/sandbox-mfa.test.ts	default production requires administrator MFA even when Cognito attestation is false
+tests/sandbox-mfa.test.ts	explicit synthetic sandbox accepts signed password-only admin, preserving actor.mfa=false and real administration
+tests/sandbox-mfa.test.ts	password-only exemption is tenant-bound and requires a completed genuine synthetic marker
+tests/sandbox-mfa.test.ts	sandbox still rejects unsigned/wrong-key/expired/wrong-issuer/audience/type tokens and development headers
+tests/sandbox-tooling.test.ts	an already-running start resets the two-hour timer through SSM with explicit instance/profile
+tests/sandbox-tooling.test.ts	auto-stop precedes every risky bootstrap command; existing disks and workload credentials fail closed
+tests/sandbox-tooling.test.ts	power commands reject an account mismatch before starting/stopping any resource
+tests/sandbox-tooling.test.ts	production API never accepts development headers or enables a public development auth bypass
+tests/sandbox-tooling.test.ts	real PostgreSQL application role has SCRAM verifier and cannot become owner/superuser/RLS bypass
+tests/sandbox-tooling.test.ts	secrets, private pins, plans/state are excluded; source examples remain included
+tests/sandbox-tooling.test.ts	stale SSM Online is not sufficient: start retries until a command actually succeeds
+tests/sandbox-tooling.test.ts	stop waits for stopping to become stopped, and never reports a terminated or still-stopping instance as stopped
+tests/sandbox.test.ts	both demo stores train forecasts from 84 complete days using real Python and PostgreSQL
+tests/sandbox.test.ts	existing real tenant and a Cognito subject in another tenant cannot be claimed or overwritten
+tests/sandbox.test.ts	parallel reruns preserve every fact, cursor and count without duplicating sales or stock
+tests/sandbox.test.ts	sandbox opt-in, subject, tenant confirmation and private PIN file are mandatory
+tests/sandbox.test.ts	seed retains RLS and immutable sales/inventory and does not expose another store
+tests/sandbox.test.ts	synthetic seed resumes after interruption and creates complete authentic business facts

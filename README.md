@@ -15,7 +15,7 @@
 
 ## ローカル起動
 
-前提: Node.js 22 以上、PostgreSQL 17、Python 3.11、JDK 17。Android は SDK 35 / Gradle 8.11.1 が必要です。
+前提: Node.js 22（22.12 以上）、PostgreSQL 17、Python 3.11、JDK 17。`.nvmrc` は Node 22、`engines` は検証対象の Node 22〜24 を指定します。Android は SDK 35 / Gradle 8.11.1 が必要です。正規 Gradle wrapper が指定版を取得するため、Gradle の別途導入は不要です。
 
 ```bash
 npm ci
@@ -61,15 +61,29 @@ set -a; source .env; set +a
 export MAINTENANCE_TEST_DATABASE_URL="$MIGRATION_DATABASE_URL"
 python3.11 -m venv .context/venv311
 .context/venv311/bin/pip install -r forecast/requirements.txt
+npm run format:check
+npm run lint
+npm run typecheck
+npm run test:manifest
+NODE_ENV=test npm run test:unit
+NODE_ENV=test npm run test:integration
 NODE_ENV=test npm test
 NODE_ENV=production npm run build
 npm run test:web
+npm run test:web:manifest
 .context/venv311/bin/python -m unittest discover -s forecast -v
+python3.11 -m unittest discover -s tests -p '*_test.py' -v
 NODE_ENV=test npx tsx scripts/restore-test.ts
 NODE_ENV=test REGI_LOAD_BASEURL=http://localhost:3000 npx tsx scripts/load-test.ts
 ```
 
-Web 操作試験は API と Web の起動、および Google Chrome (`/usr/bin/google-chrome`) を前提とします。
+`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web の6ファイル（現時点18件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点53件、PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
+
+`tests/manifest.txt` は Node 71件とブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
+
+Web 操作試験は migration・seed 済みの DB と Google Chrome (`/usr/bin/google-chrome`) を前提とします。Playwright の `webServer` が API と Web を起動して終了時に停止します。ローカルでは既存のサーバーを再利用できるため、変更後は現行 build で再起動してください。CI では再利用せず、毎回起動します。
+
+ESLint 9 の `recommended-type-checked` を全 TypeScript に適用し、API の `no-explicit-any` は警告から開始します。既存コードの型不明値・Promise 等の診断は `eslint-baseline.json` にファイル・ルール別の上限を記録し、警告として残しています。`npm run lint` は新規ファイルのエラーと警告数の増加を拒否します。警告の詳細は `.context/lint-results.json` で確認でき、既存警告の解消は今後の対象箇所から進めます。既存警告がゼロになったという意味ではありません。`typecheck` は API/Web/core に加え、scripts と tests も型検査します。
 PDF の出力・検証には Noto Sans CJK の日本語フォントと Poppler (`pdftotext`) が必要です。Amazon Linux は `sudo dnf install -y google-noto-sans-cjk-ttc-fonts poppler-utils`。フォントの配置が異なる環境では `JAPANESE_FONT` に `NotoSansCJK-Regular.ttc` のパスを指定します。Docker イメージには日本語フォントを同梱しています。
 削除試験を含む `npm test` には、ローカル限定の `MAINTENANCE_TEST_DATABASE_URL` を `.env` の `MIGRATION_DATABASE_URL` と同じ所有者接続に設定してください。通常 API には所有者接続を渡しません。
 共有する実PostgreSQLスキーマへの保守DDLと業務試験が競合しないよう、試験ファイルは順次実行します。各試験内の同時再送・同時入荷・返金の競合検証は並列のままです。
@@ -81,16 +95,34 @@ PDF の出力・検証には Noto Sans CJK の日本語フォントと Poppler (
 ```bash
 export ANDROID_HOME=/path/to/android-sdk
 printf 'sdk.dir=%s\n' "$ANDROID_HOME" > android/local.properties
-android/gradlew assembleDebug testDebugUnitTest
+android/gradlew -p android assembleDebug testDebugUnitTest
 bash scripts/android-test.sh
 terraform -chdir=infra init -backend=false
 terraform -chdir=infra validate
+terraform -chdir=infra/sandbox init -backend=false
+terraform -chdir=infra/sandbox fmt -check -recursive
+terraform -chdir=infra/sandbox validate
+terraform -chdir=infra/sandbox test
 ```
 
 同一 JSON fixture を TypeScript と Kotlin が読み、双方で10,000ケースの保存則を検査します。
 Android 接続試験はホスト API を利用し、毎回独立した試験法人・端末を実PostgreSQLに作成します。以前の失敗試験の未送信連番と運用データを混ぜません。Room 再オープン、外部決済確認待ち、72時間失効とオンライン認証更新、PKCE/state/refresh、複数明細の実画面操作、TCP 印刷 sink、永続Room DBの50,000SKU（JAN・商品名・部分一致検索）を検査します。実機・実プリンターの代替証明ではありません。
 
 `ANDROID_SERIAL=emulator-5556 bash scripts/android-restart-test.sh` は確認待ち会計を保存し、`am force-stop` 後に異なるプロセスIDで確認・同期を再開して二重売上がないことを検査します。エミュレーターのserialは `adb devices` の実際の値を指定してください。APIと `DATABASE_URL` が必要です。専用試験runnerはandroidTest APKにだけ含まれ、製品release APKへ入りません。
+
+この Conductor VM では Android SDK が `.context/android-sdk`、Python 環境が `.context/venv311` にあります。`export ANDROID_HOME="$PWD/.context/android-sdk"` と `android/local.properties` を設定して wrapper を実行します。Terraform が PATH にない場合は `.context/terraform/terraform` を使用してください。
+
+## CI と main 保護
+
+`.github/workflows/ci.yml` は format・ESLint・全層型検査・DB不要試験・実 PG17 統合試験・Chrome 操作・Python・本番 build・`npm audit --audit-level=high`・Docker build・両 Terraform root の fmt/validate・sandbox provider mock・gitleaks のソース検査を実行します。CI の DB 資格情報は使い捨てのローカル試験用です。AWS 資格情報は渡しません。Android は JVM/接続試験をローカルで実行し、emulator CI は今回の範囲外です。Dependabot は npm / Actions / Docker / Terraform / Gradle / pip を週次確認します。
+
+push・PR 作成・main 保護設定は、ユーザーの確認後に Mac または GitHub で実施します。この VM では設定しません。最初の PR で CI が全て成功したことを確認し、GitHub の Settings → Rules → Rulesets で `main` を対象に次を設定します。
+
+1. pull request を必須にする。別のレビュー担当がいる場合は承認1件以上を必須にする。
+2. status check を必須にし、実際の CI で表示された `Quality and unit`、`PostgreSQL and browser`、`Docker build`、`Terraform (infra)`、`Terraform (infra/sandbox)`、`Source secrets` を選ぶ。merge 前に最新 main との一致を必須にする。
+3. force push と branch deletion を禁止し、会話の解決を必須にする。通常の変更で管理者 bypass を使わない。
+
+CI の remote 成功・PR フロー・main 保護の完了は GitHub 側の確認結果を記録してください。ローカルの緑だけで D0-6 の外部条件を完了扱いにしません。整形コミットを blame から外す場合は `git config blame.ignoreRevsFile .git-blame-ignore-revs` を使用できます。
 
 ## 本番設定
 
