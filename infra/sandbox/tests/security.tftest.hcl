@@ -13,6 +13,7 @@ mock_provider "aws" {
   mock_resource "aws_cognito_user_pool" { defaults = { id = "ap-northeast-1_Synthetic" } }
   mock_resource "aws_cognito_user_pool_client" { defaults = { id = "synthetic-client" } }
   mock_resource "aws_cloudfront_distribution" { defaults = { domain_name = "synthetic.cloudfront.net" } }
+  mock_resource "aws_cloudfront_function" { defaults = { arn = "arn:aws:cloudfront::000000000001:function/test-web-routes" } }
 }
 mock_provider "aws" {
   alias           = "osaka"
@@ -326,5 +327,21 @@ run "explicit_synthetic_password_only" {
   assert {
     condition     = !aws_cognito_user_pool_client.web.generate_secret && contains(aws_cognito_user_pool_client.web.allowed_oauth_flows, "code") && !contains(aws_cognito_user_pool_client.web.write_attributes, "custom:tenant_id")
     error_message = "Password-only must retain public PKCE authorization code and immutable tenant identity."
+  }
+}
+
+run "web_routes_rewrite_only_the_default_web_behavior" {
+  command = plan
+  assert {
+    condition     = aws_cloudfront_function.web_routes.runtime == "cloudfront-js-2.0" && aws_cloudfront_function.web_routes.publish && aws_cloudfront_function.web_routes.code == file("${path.module}/web-route-rewrite.js")
+    error_message = "Deploy exactly the tested web route function."
+  }
+  assert {
+    condition     = one(aws_cloudfront_distribution.web.default_cache_behavior).target_origin_id == "web" && one(one(aws_cloudfront_distribution.web.default_cache_behavior).function_association).event_type == "viewer-request" && one(one(aws_cloudfront_distribution.web.default_cache_behavior).function_association).function_arn == aws_cloudfront_function.web_routes.arn
+    error_message = "Attach the rewrite only to the default web behavior."
+  }
+  assert {
+    condition     = alltrue([for behavior in aws_cloudfront_distribution.web.ordered_cache_behavior : behavior.target_origin_id == "api" && length(behavior.function_association) == 0]) && length(aws_cloudfront_distribution.web.custom_error_response) == 0
+    error_message = "API/health errors must retain their HTTP status and body rather than become HTML 200."
   }
 }

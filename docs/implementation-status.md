@@ -1,32 +1,43 @@
 # REGI 実装・検証の現状
 
-第4週までの実装とローカル回帰を完了し、`2781a44` を現在ブランチへpushしました。初回CIで新規環境の共有core未ビルドとUbuntuの任意ブラウザー起動を検出し、修正・再検証中です。実AWS受入は未実施です。
+D0の4週分は実装・push済みで、`52c1826` の [GitHub Actions全6job成功](https://github.com/takuyamurayama/regi/actions/runs/37020278090) を確認しています。続くWeb/URL・Android POS改善と仕入請求・買掛の追加実装も、下記のローカル最終検証を完了しました。追加変更のpush後のCI結果は [このブランチのCI一覧](https://github.com/takuyamurayama/regi/actions/workflows/ci.yml?query=branch%3Atakuyamurayama%2Fai-it) の該当commitを確認してください。
 
-ユーザー承認のD0を段階的に実装中です。続くUI/URL改善、実画面試験、単独ITツール登録に必要な追加機能も承認されています。既存の税込528万円・24か月の販売仕様は、機能評価や登録審査の合格を意味しません。
+正式提出資料と法人情報の収集はユーザー指示で保留しています。税込528万円・税抜480万円・24か月という既存の販売仕様を維持し、価格価値や登録審査の合格を検証結果と同一視しません。
 
-| ゲート                           | ローカル証拠                                                                                                           | 外部受入・残作業                                                       |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| D0-1 同期障害で無痕跡消失0       | Prisma注入・実31秒超lock/P2028・review/accepted保存失敗のrollbackと原ID再送                                            | 実AWS障害訓練は未実施                                                  |
-| D0-2 reviewのdismiss終端で日締め | 理由・承認者・監査・main/quarantine・連番・既存accepted保護の実PG試験                                                  | 実端末の運用受入                                                       |
-| D0-3 100件/5000行・413契約       | HTTP100件×5明細、2MiB超5000行、5MiB経路、非retryable413                                                                | 実回線/実端末確認                                                      |
-| D0-4 Android専用30日refresh      | 30日境界・時計巻戻り・client切替競合・invalid_grant保持警告                                                            | 実Cognito30日・sandbox実時間未実施                                     |
-| D0-5 毎時backup/復元             | 毎時/起動/停止script・同一snapshot、別DB復元、件数/catalog/ACL/RLS/SHA検査。実PG往復・破損/改変/容量拒否・rollback合格 | MacからAWS適用、毎時/起動/停止backup、大阪複製、RPO/RTO訓練            |
-| D0-6 CI/manifest/main保護        | 既存91名維持、Node113+Web20のmanifest133一覧生成済み                                                                   | 初回CIの環境差を修正中。mainは未作成・保護未設定、設定はユーザー確認後 |
-| D0-7 000〜007/checksum           | pg simple query、空DB8本・全SHA一致・改変拒否・SCRAM/FORCE RLS                                                         | 既存AWS移行時のchecksum確認                                            |
-| D0-8 Budget/停止費               | Budget10USD・ACTUAL80%/FORECASTED100%、停止中約650円/月の条件付き見積をdocsへ記載                                      | Mac tfvars旧30USD変更と通知受入                                        |
+## 追加実装と検証
 
-今回のVMからAWS apply・配備・S3操作は行っていません。過去sandbox配備の履歴は今回のD0ソースが配備済みである証拠にしません。端末のaccepted原イベントはDB復元だけでは自動再送されないため、復元訓練で原ID/連番/payloadと復元後サーバーを照合します。
+| 対象                     | 実装・確認内容                                                                                             | 最終状態                                                                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| WebのURL・店舗・操作復旧 | 正規URL、原記録への直接アクセス、履歴移動、店舗/操作者変更の古い応答破棄、同ID再送、再読込後の保存結果照会 | 全ブラウザー48/48、skip0・実行manifest一致。最終PDF構成で対象6件も合格                                                              |
+| 仕入請求・買掛           | 仕入先、原資料、入荷照合、税率別明細、債務、相手方確認、部分支払、減額、返金、逆記録、物品返品、訂正版     | 実HTTP/PG・原資料のSHA/bytes・応答切断・並行接続・役割/店舗RLS・原記録不変を検証。全integration132/132、skip0・実行manifest一致     |
+| 帳票・原資料出力         | 固定時点のPDF/CSV/資料bundle、用途別証拠、軽減対象、買手作成明細の両者・登録番号・確認状態                 | 必須登録番号欠落をRed→Green。関連19/19合格、原資料とmanifestのSHA照合                                                               |
+| 金額・日付・画面状態     | BigInt/整数円、500明細、原書類の税額、実取引秒、日本時間、無効な入力を保持                                 | DB不要unit47/47、runtime manifest一致                                                                                               |
+| Android POS              | 数量入力、保留、会計復旧、現金の預り/釣銭、暫定締め、再ログイン表示、キーボード到達、日本時間のレシート    | JVM10/10、既存接続25/25＋追加画面17unique合格。検索p95 141/153ms・会計181ms。強制終了PID6688→6736で会計保持・同ID確定/同期/締め合格 |
+| バックアップ・復元       | 元D0の8migrationと別の全9migration、金融13表・元スナップショット・逆記録の実PG dump/復元照合               | host Python28/28、forecast Python5/5                                                                                                |
+| 静的検査・環境           | lint警告予算、全型検査、core/API/Web build、npm audit                                                      | 合格。高severity以上の依存脆弱性0。Docker build・runtime health/401・非root・保守imports・Python5も合格。全整形・秘密scan0も合格    |
+| インフラ                 | Tier Mの意味的変更なし。sandboxの正規URL rewriteと新経路の境界                                             | 両root validate・sandbox provider mock11/11。AWS apply/配備/S3操作なし                                                              |
 
-資格については「問題ない」という本人申告です。原本や審査機関による確認、一般販売開始・有償導入実績は未確認です。合成売上を実顧客実績に読み替えません。指定Android実機・実プリンター・実決済、法務/税務、正式登録審査も未完了です。
+`tests/manifest.txt` はNode179（unit47＋integration132）＋Web48＝227件です。D0時点の133名（Node113＋Web20）をすべて保持し、追加94件。元の期待値を緩めず、D0の8migration試験は元SQLをそのまま別fixtureに固定し、008は独立した9migration/upgrade試験で検証します。最終全integrationはREADME通りの所有者接続も設定し132/132合格しました。先行130/131の1失敗はその実行環境変数の設定漏れで、期待値や製品コードを緩めず再実行しました。
 
-過去記録は [2026-10-01](history/2026-10-01.md) と [初期検証・2026-10-02](history/2026-10-02.md) に保持します。
+## D0と外部受入
 
-ローカルの第3週回帰はNode104/104、Web20/20、Android JVM7/7・接続25/25（既存8＋追加17、skip0）。検索は元5万SKU・60サンプル・p95<300msを維持して連続166/153ms、会計確定184ms（元1秒未満）。強制終了後にPID4448→4498で同じ確認待ち会計の保持・二重確定防止・同期・締めを確認しました。manifest124名は元91名をすべて保持しています。型・lint警告予算・整形・秘密scan0も合格。
+| ゲート | 確認済みの実装・ローカル/CI証拠                                                            | 外部受入                                   |
+| ------ | ------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| D0-1   | 障害注入、31秒超lock/P2028、保存失敗rollback、同ID再送                                     | 実AWS障害訓練                              |
+| D0-2   | main/quarantineの理由付きdismiss、監査、終端判定、元accepted保持                           | 実端末の運用受入                           |
+| D0-3   | HTTP100件×5明細、5000行CSV、経路別上限、非retryableの日本語413                             | 実回線/実端末                              |
+| D0-4   | Android専用30日refresh、時計巻戻り、切替競合、invalid_grant警告                            | 実Cognito30日・sandbox実時間               |
+| D0-5   | 毎時/起動/停止backup、同一snapshot、別DB復元、catalog/ACL/RLS/件数/SHA、容量拒否・rollback | MacでAWS適用、backup/大阪複製、RPO/RTO訓練 |
+| D0-6   | 全6job CI緑、133名のAST/実行manifest一致。追加227名のAST/実行manifest一致確認              | mainは未作成・保護未設定。手順はREADME     |
+| D0-7   | pg simple query、000〜007の8本SHA、SCRAM、改変拒否。追加008も空DB/007upgrade/RLS確認       | AWS移行時のchecksum照合                    |
+| D0-8   | Budget10USD・ACTUAL80%/FORECASTED100%、停止中約650円/月の条件付き見積                      | Macのtfvars更新と通知受入                  |
 
-同期契約は [同期プロトコル](architecture/sync-protocol.md)、設計判断は [ADR一覧](adr/0001-incremental-hardening.md)、Mac配備と復元は [配備手順](runbook/deploy.md)・[復元手順](runbook/restore.md) を参照してください。
+単独申請の資格は「問題ない」という本人申告です。一般販売開始・有償導入・実プリンター・指定実機・実決済・法務/税務・正式登録審査は未確認です。現行の [ITツール登録要領](https://it-shien.smrj.go.jp/pdf/it2026_touroku_it_tool.pdf) と [国税庁6625](https://www.nta.go.jp/taxes/shiraberu/taxanswer/shohi/6625.htm) の照合では、カテゴリー1のクラウド型スマートレジ「決済＋買手側受発注」の候補として必要な製品機能を確認し、見つかった買手作成PDFの登録番号欠落を修正しました。原本確認や事務局承認を済ませた扱いにはしません。
 
-第4週の最終Node112/112・freshWeb20/20・runtime manifest132一致を確認しました。host Python27/27は最終sourceをCI同様のPG17コンテナークライアントで検証し（先行するローカル試験26/26も合格）、forecast Python5/5もDocker内で合格。Dockerはdigest固定build、非root・開発依存不在、保守import、health200/healthy、未認証401。両Terraform validateとsandbox mock10/10、最終host13ファイルSHA照合も合格しました。Android sourceと同期wire契約は第3週から変更せず、オンライン締め条件はoutboxのshift.closeへ掛けていません。
+AWS apply・配備・S3操作はこのVMから実行していません。過去sandbox配備記録は今回のソースの配備証拠になりません。バックアップは現行35日＋非現行35日の例で約70日残り、複製未成功で延びる場合があります。DB復元後には端末accepted原イベントのID/連番/payloadとの照合が必要です。
 
-D0余力枠はC153（オンライン締めの同期/要確認解消前提）とC24（top-level PIN除去後のoperation hash）をRed→Greenで追加しました。既存PIN付きhashは不一致拒否し履歴を書換えず、旧IDが拒否された場合の新ID自動再実行も行いません。C154（翌営業日05時以降の価格）とC155（終了営業日だけの日締め）は画面・商品作成契約を合わせるpost-D0の課題として残しています。
+D0余力枠C153（オンライン締めの同期済み条件）・C24（top-level PINを除いた冪等hash）は実装済みです。C154（翌営業日05時以降の価格）・C155（終了営業日だけの日締め）は任意追加の未実装項目です。Roomはversion4、スキーマ変更なし。
 
-CIの品質jobはWebがimportする共有coreを先にbuildする手順へ修正しました。sandbox起動はLinuxのheadless環境でURLを開かず、Macで任意browserが失敗しても確認済みの起動結果を維持します。元試験の期待値は維持し、Linux/Macの回帰1件を追加しました。最新manifestは133件（Node113、Web20）です。リモート初回pushのためGitHubが現在ブランチを既定にしましたが、main作成・既定branch変更・branch protection・PR作成は行っていません。
+仕様は [同期プロトコル](architecture/sync-protocol.md)・[仕入請求と買掛](architecture/purchase-finance.md)、Macでの適用は [配備手順](runbook/deploy.md)・[復元手順](runbook/restore.md)・[sandbox](aws-sandbox.md) を参照してください。
+
+履歴は [2026-10-01](history/2026-10-01.md)、[初期検証](history/2026-10-02.md)、[D0](history/2026-10-02-d0.md)、[追加実装](history/2026-10-02-post-d0.md) に保持します。

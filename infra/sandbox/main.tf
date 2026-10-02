@@ -352,6 +352,13 @@ resource "aws_cloudfront_origin_access_control" "web" {
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
 }
+resource "aws_cloudfront_function" "web_routes" {
+  name    = "${var.name}-web-routes"
+  runtime = "cloudfront-js-2.0"
+  comment = "Serve canonical REGI UI paths from the web origin; leave API and files untouched."
+  publish = true
+  code    = file("${path.module}/web-route-rewrite.js")
+}
 resource "aws_cloudfront_distribution" "web" {
   enabled             = true
   default_root_object = "index.html"
@@ -372,6 +379,10 @@ resource "aws_cloudfront_distribution" "web" {
     cached_methods         = ["GET", "HEAD"]
     viewer_protocol_policy = "redirect-to-https"
     cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.web_routes.arn
+    }
   }
   dynamic "ordered_cache_behavior" {
     for_each = ["/v1/*", "/health"]

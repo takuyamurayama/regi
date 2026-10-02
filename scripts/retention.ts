@@ -2,6 +2,19 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { S3Client, ListObjectVersionsCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { pathToFileURL } from 'node:url';
 const tables = [
+  'purchase_supplier_confirmations',
+  'purchase_export_snapshots',
+  'purchase_evidence',
+  'purchase_finance_facts',
+  'purchase_ledger',
+  'purchase_return_lines',
+  'purchase_returns',
+  'purchase_invoice_allocations',
+  'purchase_invoice_identity',
+  'purchase_invoice_snapshots',
+  'purchase_invoices',
+  'purchase_supplier_links',
+  'purchase_suppliers',
   'device_event_quarantine',
   'device_events',
   'device_leases',
@@ -21,6 +34,23 @@ const tables = [
   'stores',
   'tenants',
 ];
+const immutableTriggers = [
+  ['inventory', 'inventory_immutable'],
+  ['audit', 'audit_immutable'],
+  ['documents', 'sales_immutable'],
+  ...[
+    'purchase_supplier_confirmations',
+    'purchase_evidence',
+    'purchase_finance_facts',
+    'purchase_ledger',
+    'purchase_return_lines',
+    'purchase_returns',
+    'purchase_invoice_allocations',
+    'purchase_invoice_identity',
+    'purchase_invoice_snapshots',
+    'purchase_supplier_links',
+  ].map((table) => [table, 'purchase_fact_immutable']),
+];
 export async function retireTenant(
   client: PrismaClient,
   tenantId: string,
@@ -33,7 +63,7 @@ export async function retireTenant(
     throw new Error('Production artifact bucket required');
   return client.$transaction(
     async (transaction) => {
-      await transaction.$executeRaw`SELECT set_config('regi.tenant',${tenantId},true),set_config('regi.all_stores','true',true)`;
+      await transaction.$executeRaw`SELECT set_config('regi.tenant',${tenantId},true),set_config('regi.all_stores','true',true),set_config('regi.role','admin',true)`;
       const tenant = await transaction.$queryRaw<
         any[]
       >`SELECT * FROM tenants WHERE id=${tenantId}::uuid FOR UPDATE`;
@@ -88,25 +118,24 @@ export async function retireTenant(
       );
       for (const table of tables)
         await transaction.$executeRawUnsafe(`ALTER TABLE ${table} NO FORCE ROW LEVEL SECURITY`);
-      for (const [table, trigger] of [
-        ['inventory', 'inventory_immutable'],
-        ['audit', 'audit_immutable'],
-        ['documents', 'sales_immutable'],
-      ])
+      for (const [table, trigger] of immutableTriggers)
         await transaction.$executeRawUnsafe(`ALTER TABLE ${table} DISABLE TRIGGER ${trigger}`);
       for (const table of tables)
         await transaction.$executeRaw(
           Prisma.sql`DELETE FROM ${Prisma.raw(table)} WHERE ${Prisma.raw(table === 'tenants' ? 'id' : 'tenant_id')}=${tenantId}::uuid`,
         );
-      for (const [table, trigger] of [
-        ['inventory', 'inventory_immutable'],
-        ['audit', 'audit_immutable'],
-        ['documents', 'sales_immutable'],
-      ])
+      for (const [table, trigger] of immutableTriggers)
         await transaction.$executeRawUnsafe(`ALTER TABLE ${table} ENABLE TRIGGER ${trigger}`);
       for (const table of tables)
         await transaction.$executeRawUnsafe(`ALTER TABLE ${table} FORCE ROW LEVEL SECURITY`);
-      return { tenantId, mode: 'deleted', counts, backupExpiresAfterDays: 35 };
+      return {
+        tenantId,
+        mode: 'deleted',
+        counts,
+        backupExpiresAfterDays: 70,
+        backupExpiryIsEstimate: true,
+        backupReplicationCanExtend: true,
+      };
     },
     { timeout: 180000 },
   );

@@ -7,6 +7,9 @@ import { Administration } from './admin';
 import { Imports } from './import';
 import { Recommendations } from './recommendations';
 import type { Actor } from './db';
+import type { Response } from 'express';
+import { FinanceExports } from './finance-exports';
+import { z } from 'zod';
 @ApiTags('REGI')
 @ApiBearerAuth()
 @Controller()
@@ -18,6 +21,7 @@ export class Api {
     private readonly administration: Administration,
     private readonly imports: Imports,
     private readonly recommendations: Recommendations,
+    private readonly financeExports: FinanceExports,
   ) {}
   @Post('v1/products/import') importProducts(@Req() request: any, @Body() body: any) {
     return this.imports.products(request.actor, body);
@@ -43,6 +47,13 @@ export class Api {
   }
   @Get('v1/settings') settings(@Req() request: any) {
     return this.business.settings(request.actor);
+  }
+  @Get('v1/operations/:id/status') operationStatus(
+    @Req() request: { actor: Actor },
+    @Param('id') id: string,
+    @Query() query: unknown,
+  ) {
+    return this.business.operationStatus(request.actor, id, query);
   }
   @Get('v1/products') products(@Req() request: any) {
     return this.business.products(request.actor);
@@ -215,17 +226,47 @@ export class Api {
   @Get('v1/ai/forecasts') forecasts(@Req() request: any, @Query('storeId') storeId: string) {
     return this.ai.forecasts(request.actor, storeId);
   }
-  @Post('v1/exports') async export(@Req() request: any, @Body() body: any) {
+  @Post('v1/exports') async export(@Req() request: { actor: Actor }, @Body() body: unknown) {
+    if (
+      typeof body === 'object' &&
+      body !== null &&
+      'format' in body &&
+      typeof body.format === 'string' &&
+      [
+        'purchase-invoice-pdf',
+        'purchase-finance-bundle',
+        'payables-csv',
+        'purchase-payments-csv',
+      ].includes(body.format)
+    )
+      return this.financeExports.request(request.actor, body);
     const job = await this.artifacts.request(request.actor, body);
     if (!process.env.EXPORT_QUEUE_URL) setImmediate(() => this.artifacts.tick(request.actor));
     return job;
   }
   @Get('v1/exports/:id/download') async download(
-    @Req() request: any,
+    @Req() request: { actor: Actor },
     @Param('id') id: string,
-    @Res() response: any,
+    @Res() response: Response,
+    @Query('storeId') storeId: unknown,
   ) {
-    const result = await this.artifacts.download(request.actor, id);
+    if (await this.financeExports.exists(request.actor, id)) {
+      const result = await this.financeExports.download(request.actor, id, storeId);
+      response.setHeader('Content-Type', result.mediaType);
+      response.setHeader('Content-Length', result.bytes.length);
+      response.setHeader(
+        'Content-Disposition',
+        "attachment; filename*=UTF-8''" + encodeURIComponent(result.filename),
+      );
+      response.setHeader('ETag', '"' + result.sha256 + '"');
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      response.send(result.bytes);
+      return;
+    }
+    const downloaded: unknown = await this.artifacts.download(request.actor, id);
+    const result = z
+      .object({ bytes: z.instanceof(Buffer), extension: z.enum(['pdf', 'tar.gz', 'csv']) })
+      .parse(downloaded);
     response.setHeader(
       'Content-Type',
       result.extension === 'pdf'

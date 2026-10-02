@@ -22,7 +22,7 @@ class AcceptanceTest {
         var database = open()
         var repository = Repository(context, database)
         repository.network.configure(
-            "http://10.0.2.2:3000",
+            fixtureApiBaseUrl(),
             "",
             true,
             fixture().getString("cashierSubject"),
@@ -80,7 +80,7 @@ class AcceptanceTest {
         assertEquals(1, repository.dao.pendingCount())
         val payload = repository.dao.pending().first().payload
         repository.network.configure(
-            "http://10.0.2.2:3000",
+            fixtureApiBaseUrl(),
             "",
             true,
             fixture().getString("cashierSubject"),
@@ -128,7 +128,7 @@ class AcceptanceTest {
         val database = Room.databaseBuilder(context, PosDatabase::class.java, "hold.db").build()
         val repository = Repository(context, database)
         repository.network.configure(
-            "http://10.0.2.2:3000",
+            fixtureApiBaseUrl(),
             "",
             true,
             fixture().getString("cashierSubject"),
@@ -233,7 +233,7 @@ class AcceptanceTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val network = Network(context)
         network.configure(
-            "http://10.0.2.2:3000",
+            fixtureApiBaseUrl(),
             "",
             true,
             "first-account",
@@ -254,7 +254,7 @@ class AcceptanceTest {
                 .getString("posStaff", null),
         )
         network.configure(
-            "http://10.0.2.2:3000",
+            fixtureApiBaseUrl(),
             "",
             true,
             fixture().getString("cashierSubject"),
@@ -377,7 +377,7 @@ class AcceptanceTest {
         var now = java.time.Instant.now()
         val repository = Repository(context, database) { now }
         repository.network.configure(
-            "http://10.0.2.2:3000",
+            fixtureApiBaseUrl(),
             "",
             true,
             fixture().getString("cashierSubject"),

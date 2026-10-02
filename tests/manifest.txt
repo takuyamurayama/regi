@@ -1,4 +1,6 @@
 tests/ai-plan.test.ts	Japanese natural-language periods use business dates and reject future actuals
+tests/api-read-contract.test.ts	HTTP document lists reject empty or malformed store UUID with nonretryable 400 while omitted headquarters scope stays valid
+tests/api-read-contract.test.ts	HTTP settings actor reflects authenticated staff and role instead of client supplied role or staff fields
 tests/api-response.test.ts	CloudFront HTML errors show cause and recovery instructions, never raw HTML or JSON parse errors
 tests/api-response.test.ts	business error messages retain next actions; general network failure does not assert the server is stopped
 tests/artifacts.test.ts	500明細でも全商品を一度ずつ出力し、各ページに表見出しとページ番号を付ける
@@ -13,6 +15,10 @@ tests/auth-audience.test.ts	Android client configuration does not replace the re
 tests/auth-audience.test.ts	Cognito accepts signed Web and Android ID tokens with the same tenant staff and MFA checks
 tests/auth-audience.test.ts	Web authentication remains available before the Android client ID is configured
 tests/auth-web.test.ts	browser PKCE rejects mismatched and expired state, refreshes once and clears logout
+tests/auth-web.test.ts	browser logout rejects stale refresh result without reviving credentials
+tests/browser/action-intent.spec.ts	保存後の一覧取得失敗を未保存として再実行しない
+tests/browser/action-intent.spec.ts	入荷のcommit後に応答が失われても同じ操作IDの再送で入荷を重ねない
+tests/browser/action-intent.spec.ts	現金記録の応答が失われても再確認で原記録と監査を重複しない
 tests/browser/ai.spec.ts	AI shows JST quota, returns failed connection quota and keeps sales usable
 tests/browser/auth.spec.ts	ブラウザー標準fetchでPKCEのコード交換と並列トークン更新が成功する
 tests/browser/design.spec.ts	キーボードでメイン・ナビ・出力履歴へアクセスし動きを抑制できる
@@ -22,17 +28,42 @@ tests/browser/design.spec.ts	読み込み中の金額と比率を売上ゼロと
 tests/browser/exports.spec.ts	CSV・保存帳票一式を作成も完了を自動表示して保存できる
 tests/browser/exports.spec.ts	PDF作成後に履歴を開き、遅い作成の完了を自動確認して保存できる
 tests/browser/exports.spec.ts	取引CSVを作成も完了を自動表示して保存できる
+tests/browser/finance-correction.spec.ts	取消済み原請求から訂正下書きを作成し証拠を再添付しても旧原請求と税額を変更しない
+tests/browser/finance-correction.spec.ts	訂正下書きの作成は取消済み請求の管理者に限り店長と確定済み原請求には表示しない
+tests/browser/finance-evidence.spec.ts	原資料の初回拒否は未確認として固定せずファイルを修正でき金額や添付履歴を捏造しない
+tests/browser/finance-evidence.spec.ts	原資料保存後の応答切断と画面移動でも同じ操作IDとファイルを再確認し原資料を重複させない
+tests/browser/finance-exports.spec.ts	請求PDFの出力応答が切断しても同じ要求を再確認し後日の支払を固定済み原明細に混ぜない
+tests/browser/finance-exports.spec.ts	買手作成明細は実際の相手名と日時と根拠資料を記録するまで仕入先確認済みにしない
+tests/browser/finance-exports.spec.ts	買掛CSVは画面で確認した観測時点と条件を保持し遅れて記録した支払を混ぜない
+tests/browser/finance-exports.spec.ts	関連資料一括出力を画面から取得し原ファイル全件と固定明細のSHAを照合する
+tests/browser/finance-responsive.spec.ts	仕入請求の長い識別子と仕入先名でも狭い画面で残高と支払操作を確認できる
+tests/browser/finance-return-refund.spec.ts	物品返品・原税額による減額・返金受領と逆記録を画面で操作し原請求と在庫を保持する
+tests/browser/finance-workflow.spec.ts	仕入画面で混在税率の下書きを確定し支払の応答切断後も同じ操作IDで残高と原請求を守る
+tests/browser/finance-workflow.spec.ts	仕入画面は無効な数量と日本暦日を保持し未確定の原請求を0円確定として表示しない
 tests/browser/guild.spec.ts	白いモダン画面は光るAI装飾なしで実際の予測画面へ遷移する
 tests/browser/guild.spec.ts	白基調の画面で金額・説明・フォーム・実APIエラーを読める
 tests/browser/operations.spec.ts	ダッシュボード画面を保存
 tests/browser/operations.spec.ts	二明細発注で第二明細だけ分納し、二明細売上の第二明細を返品する
 tests/browser/operations.spec.ts	商品登録 → 発注承認 → 発行 → 分納入荷 → 在庫表示
 tests/browser/operations.spec.ts	担当外店舗・レジ担当の管理操作は拒否
+tests/browser/purchase-supplier.spec.ts	仕入先マスターで発注し既存発注へ対応付けても発行済み仕入先と原明細を変えない
+tests/browser/recovery-scope.spec.ts	所属外の有効な店舗UUIDのURLは店舗を置換せず表示と送信を止める
+tests/browser/recovery-scope.spec.ts	未確認操作の店舗から移動しても元店舗への復旧案内を消さない
+tests/browser/reload-recovery.spec.ts	原資料応答を失って再読み込みしてもファイルを永続化せず保存結果照会から元SHAの添付を再取得する
+tests/browser/reload-recovery.spec.ts	支払応答を失って再読み込みしても本人の保存結果を照会し旧版の支払を二重送信しない
 tests/browser/retro.spec.ts	ショートカットの4操作はキーボードで既存の業務画面へ進む
 tests/browser/retro.spec.ts	白背景・細い単線枠と通常フォントで業務メニューを表示する
+tests/browser/routing.spec.ts	店舗と期間の変更をURLへ保存し、再読み込みで復元する
+tests/browser/routing.spec.ts	戻ると進むで画面を復元し、履歴に新しい遷移を重ねない
+tests/browser/routing.spec.ts	旧日本語pageのURLを店舗と期間を保って正規URLへ置換する
+tests/browser/routing.spec.ts	画面をURLへ保存し、再読み込みで同じ業務画面へ戻る
 tests/browser/sandbox.spec.ts	HTML504は生の解析エラーでなく、起動待ちと再読み込みの案内を表示する
 tests/browser/sandbox.spec.ts	架空データを明示し、今日のゼロ売上から84日間の実デモ集計と予測へ進める
+tests/browser/state-isolation.spec.ts	AからBへ切り替えて戻っても古いAの読取結果を復活させない
+tests/browser/state-isolation.spec.ts	店舗切替後に遅い入荷履歴を別店舗の画面へ表示しない
 tests/browser/stocktake.spec.ts	棚卸の複数実査・隔離承認・遅延売上再照合を画面で完結
+tests/browser/sync-review.spec.ts	同じIDの原記録と隔離記録を別々に理由付きで却下し終端状態を確認する
+tests/browser/sync-review.spec.ts	同期画面は依存待ちと要確認を区別し端末の未送信と要確認を別表示する
 tests/core.test.ts	10000 seeded monetary conservation cases
 tests/core.test.ts	CSV formulas neutralized and quotes escaped
 tests/core.test.ts	CSV handles BOM, commas, quotes and CRLF
@@ -60,6 +91,46 @@ tests/db.test.ts	reorder fallback uses configured base stock and order unit roun
 tests/db.test.ts	reserved quantities and unknown refunds remain locked
 tests/db.test.ts	stocktake requires stopped synchronized devices and writes only deltas
 tests/db.test.ts	transfer excludes in-transit stock until receiving
+tests/finance-boundaries.test.ts	HTTP five hundred lines with thirty-digit prices and ten thousand units post exact thirty-seven-digit aggregates without database overflow
+tests/finance-boundaries.test.ts	HTTP impossible two-hundred-digit supplier transcription fails before ledger storage while original evidence and incomplete draft remain intact
+tests/finance-boundaries.test.ts	HTTP invoice receipt reservations serialize across drafts while physical return quantities stay separate and cancellation preserves original facts
+tests/finance-buyer-pdf.test.ts	HTTP registered-supplier buyer statement PDF preserves both parties and supplier registration number before and after snapshot-bound confirmation
+tests/finance-contracts.test.ts	finance dates are valid Japanese calendar dates and offset timestamps normalize to UTC without altering the source day
+tests/finance-contracts.test.ts	finance incomplete draft preserves every field and accepts 500 Japanese lines but rejects a 501st line
+tests/finance-contracts.test.ts	finance input contracts reject client actor tenant keys and registration state mismatches
+tests/finance-contracts.test.ts	finance money contracts reject JSON numbers negatives decimal notation and overlong inputs without losing big integers
+tests/finance-contracts.test.ts	finance original identities preserve spelling and require explicit unnumbered identification instead of inventing vendor numbers
+tests/finance-contracts.test.ts	finance tax classification accepts zero-rate reduced targets but rejects taxable values on non-taxable or out-of-scope lines
+tests/finance-correction.test.ts	HTTP manager can create ordinary incomplete invoice draft but cannot create a financial correction from a voided invoice
+tests/finance-correction.test.ts	two HTTP connections create only one active correction draft and cancelled correction permits a new draft without original source rewriting
+tests/finance-exports.test.ts	HTTP finance PDF and evidence bundle capture immutable source and byte hashes before later master and payment changes
+tests/finance-exports.test.ts	HTTP finance bundle rejects more than sixty-four MiB of original evidence without silently omitting files
+tests/finance-facts.test.ts	HTTP buyer statement stays unconfirmed until actual matching snapshot evidence and supports void correction without source rewriting
+tests/finance-facts.test.ts	HTTP credit uses original line tax allocations and supplier refund reversal preserves every immutable signed fact
+tests/finance-facts.test.ts	HTTP selected supplier links keep issued purchase text immutable and physical returns never reduce invoice match availability
+tests/finance-migration.test.ts	finance 007 upgrade preserves confirmed sale bytes and inventory while app role cannot mutate migration metadata
+tests/finance-migration.test.ts	finance FORCE RLS denies cashier and unclassified sessions then isolates manager tenant and store
+tests/finance-migration.test.ts	finance empty database applies 000 through 008 once while every D0 migration byte checksum remains frozen
+tests/finance-migration.test.ts	finance posted sources ledger signs reversals and tenant-store foreign keys reject direct corruption
+tests/finance-paging.test.ts	HTTP fifty-one payable invoices use returned default asOf on page two and exclude later recorded backdated payments
+tests/finance-paging.test.ts	HTTP mutable supplier pages reject changed membership instead of silently skipping offsets
+tests/finance-retention.test.ts	isolated real PostgreSQL retirement deletes every finance child and inverse fact then restores FORCE RLS and immutable triggers
+tests/finance-security.test.ts	HTTP binary magic and ten-MiB caps reject evidence without creating an attachment or a payable debit
+tests/finance-security.test.ts	HTTP evidence response loss replays one immutable SHA and rejects changed bytes with the same operation ID
+tests/finance-security.test.ts	HTTP finance changes contain only minimal markers and cashier filtering happens before the one-thousand change limit
+tests/finance-security.test.ts	HTTP financial roles and app FORCE RLS restrict posted invoices and evidence to the authenticated tenant and store
+tests/finance-security.test.ts	HTTP missing or corrupted evidence returns unavailable while preserving its original metadata and payable snapshot
+tests/finance-security.test.ts	HTTP twenty-evidence limit rejects only the twenty-first attachment while retaining all original hashes and the draft balance
+tests/finance-tax.test.ts	finance previews keep incomplete identity original-source allocation and date errors explicit without calling the draft posted
+tests/finance-tax.test.ts	finance tax inclusive exclusive rounding discount and huge integer arithmetic retain exact group line totals
+tests/finance-tax.test.ts	finance tax rounds once per rate and keeps taxable zero non-taxable and out-of-scope groups separate
+tests/finance-tax.test.ts	finance zero-value and non-taxable groups never accept an invented supplier tax under the rounding variance allowance
+tests/finance-tax.test.ts	supplier stated variance is bounded by group line count while fixed gross and original tax remain distinct
+tests/finance-ui.test.ts	finance UI converts actual Japanese calendar timestamps independently of host timezone and rejects impossible dates
+tests/finance-ui.test.ts	finance UI keeps huge yen and signed refund balances exact and never renders invalid amounts as zero
+tests/finance-ui.test.ts	finance UI preserves actual event seconds so a return after a receipt is not rounded back before it
+tests/finance-ui.test.ts	finance UI preserves invalid quantity rate and money input until corrected and stores reduced classification explicitly
+tests/finance-ui.test.ts	finance UI saves an incomplete skeleton without inventing original dates or mutating the source snapshot
 tests/forecast-db.test.ts	real PostgreSQL forecast reads only complete days, persists seven days and rejects another store
 tests/migration.test.ts	000 role bootstrap requires a verifier, creates safe SCRAM login and rejects an unsafe existing role
 tests/migration.test.ts	empty database applies 000 through 007 with matching checksums and safe SCRAM app role
@@ -69,13 +140,24 @@ tests/migration.test.ts	migration SHA-256 is exact, rerun is idempotent and tamp
 tests/migration.test.ts	migration failure rolls back all statements and does not record an applied version
 tests/migration.test.ts	migration runner preserves tagged dollar quotes and semicolons in complete SQL files
 tests/migration.test.ts	nontransaction header permits concurrent indexes while keeping quoted statements intact
+tests/operation-status.test.ts	HTTP operation status conceals other actors stores tenants and demoted financial roles and requires a matching audit record
+tests/operation-status.test.ts	HTTP operation status resolves committed financial response loss without exposing saved results and survives invoice version changes
+tests/operation-status.test.ts	HTTP operation status validates identifiers denies recovery credentials and observes the contract read grace period
 tests/payload-limit.test.ts	HTTP accepts one hundred sales with five lines and five thousand CSV rows; every body limit returns actionable nonretryable Japanese 413
 tests/pin-idempotency.test.ts	fresh shift opening still rejects a wrong PIN and stores a PIN-free operation hash after correct authentication
 tests/pin-idempotency.test.ts	legacy staff and redacted shift PIN hashes fail closed without rewriting history or reexecuting business actions
 tests/pin-idempotency.test.ts	staff mutation excludes only top-level PIN from idempotency hash while preserving original PIN verification and audit redaction
+tests/pos-invoice-snapshot.test.ts	actual persisted reduced sale PDF marks reduced targets and legend independently of displayed percentage
+tests/pos-invoice-snapshot.test.ts	buyer-required live sale persists review and no sale or stock mutation until an explicit valid buyer event arrives
+tests/pos-invoice-snapshot.test.ts	client supplied sale tax metadata cannot override verified classification or be approved into a sale
+tests/pos-invoice-snapshot.test.ts	real mixed-rate sale PDF and completed download retain original invoice snapshot after master and profile changes
+tests/pos-invoice-snapshot.test.ts	real partial refunds keep original issuer buyer dates rates and allocated tax without rewriting the sale
+tests/pos-invoice-snapshot.test.ts	server derives reduced tax classification from verified historical code for old payloads even at reduced 12 percent and standard 8 percent
 tests/presentation.test.ts	payment proportions retain integer precision beyond Number.MAX_SAFE_INTEGER
 tests/presentation.test.ts	payment shares reflect actual totals, including zero and absent methods
 tests/presentation.test.ts	yen display preserves integer amounts, negative amounts and grouping
+tests/purchase-finance.test.ts	HTTP original-evidence invoice posts once and partial payment reversal preserves original snapshots audit and signed payable balance
+tests/purchase-finance.test.ts	two real API database connections serialize stale-version payments without double payment or lost evidence
 tests/report-period.test.ts	optional demo Web build selects seven real historical days after the Cognito callback returns to root
 tests/retention.test.ts	retention dry run, expiry guard and owner deletion preserve RLS and immutable triggers
 tests/review.test.ts	PIN cashier downscopes old administrator token and cannot elevate cashier token
@@ -131,3 +213,15 @@ tests/sync-failure.test.ts	real PostgreSQL waiting state blocks dayClose when st
 tests/sync-failure.test.ts	real PostgreSQL waiting state blocks stocktake when stored in device_event_quarantine
 tests/sync-failure.test.ts	real PostgreSQL waiting state blocks stocktake when stored in device_events
 tests/sync-failure.test.ts	temporary database failures always keep the whole batch retryable without private messages
+tests/web-intent.test.ts	web commit lookup after reload clears unknown metadata without reconstructing or resending the old request
+tests/web-intent.test.ts	web confirmed mutations stay successful after a read failure and permit explicit new operations
+tests/web-intent.test.ts	web intent fingerprint excludes only top level PIN and keeps input ordering semantics
+tests/web-intent.test.ts	web intent retries a lost response with the same ID and persists only recovery metadata
+tests/web-intent.test.ts	web logout discards a late acknowledged response and retains only unknown recovery metadata
+tests/web-intent.test.ts	web reloaded intent resumes the same ID and initial validation rejection permits correction
+tests/web-intent.test.ts	web unresolved intent rejects edits and replacement IDs and survives a later business rejection
+tests/web-rewrite.test.ts	sandbox web rewrite preserves API, health, assets, unknown paths and nonread methods
+tests/web-rewrite.test.ts	sandbox web rewrite serves every canonical UI path and invoice deep link without changing query scope
+tests/web-routing.test.ts	web auth return paths reject external, control and credential URLs
+tests/web-routing.test.ts	web invoice deep links retain the selected record without accepting invalid scope fields
+tests/web-routing.test.ts	web routes preserve legacy page, store and dates across canonical round trips

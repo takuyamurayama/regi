@@ -9,6 +9,7 @@ import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { randomUUID } from 'node:crypto';
 import { archive } from './archive';
 import { renderDocumentPdf } from './pdf';
+import { z } from 'zod';
 const directory = join(process.cwd(), '.context', 'artifacts');
 export function csv(value: unknown) {
   const text = String(value ?? '');
@@ -17,10 +18,18 @@ export function csv(value: unknown) {
 @Injectable()
 export class Artifacts {
   constructor(private readonly business: Business) {}
-  async request(actor: Actor, input: any) {
-    this.business.access(actor, input.storeId, ['admin', 'headquarters', 'manager']);
+  async request(actor: Actor, input: unknown) {
+    const data = z
+      .object({
+        operationId: z.uuid(),
+        storeId: z.uuid(),
+        format: z.string(),
+        documentId: z.uuid().nullable().optional(),
+      })
+      .parse(input);
+    this.business.access(actor, data.storeId, ['admin', 'headquarters', 'manager']);
     requireRule(
-      ['csv', 'bundle', 'purchase-pdf', 'receipt-pdf', 'refund-pdf'].includes(input.format),
+      ['csv', 'bundle', 'purchase-pdf', 'receipt-pdf', 'refund-pdf'].includes(data.format),
       'EXPORT_FORMAT',
       '出力形式が不正です',
       400,
@@ -29,16 +38,30 @@ export class Artifacts {
       actor,
       input,
       'export.request',
-      input.storeId,
+      data.storeId,
       async (transaction) => {
         await this.business.contract(transaction, false);
+        if (['purchase-pdf', 'receipt-pdf', 'refund-pdf'].includes(data.format)) {
+          requireRule(data.documentId, 'INVALID_INPUT', '出力対象が必要です', 400);
+          const kind =
+            data.format === 'purchase-pdf'
+              ? 'purchase-order'
+              : data.format === 'refund-pdf'
+                ? 'refund'
+                : 'sale';
+          const [source] = await rows<{ id: string }>(
+            transaction,
+            sql`SELECT id FROM documents WHERE id=${data.documentId}::uuid AND kind=${kind} AND store_id=${data.storeId}::uuid`,
+          );
+          requireRule(source, 'NOT_FOUND', '同じ店舗の出力対象がありません', 404);
+        }
         return this.business.createDocument(
           transaction,
           actor,
           'export',
           'queued',
-          { format: input.format, documentId: input.documentId ?? null },
-          input.storeId,
+          { format: data.format, documentId: data.documentId ?? null },
+          data.storeId,
         );
       },
       true,
@@ -219,10 +242,17 @@ export class Artifacts {
     }
   }
   async download(actor: Actor, id: string) {
+    requireRule(
+      !actor.deviceId && ['admin', 'headquarters', 'manager'].includes(actor.role),
+      'ROLE_FORBIDDEN',
+      '帳票取得の権限がありません',
+      403,
+    );
     const record = await this.business.database.transaction(actor, async (transaction) => {
       await this.business.contract(transaction, false);
       return this.business.document(transaction, id, 'export');
     });
+    this.business.access(actor, record.store_id, ['admin', 'headquarters', 'manager']);
     requireRule(record.status === 'completed', 'EXPORT_PENDING', '出力処理中です');
     if (process.env.ARTIFACT_BUCKET) {
       const output = await new S3Client({ region: process.env.AWS_REGION }).send(

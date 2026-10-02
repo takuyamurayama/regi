@@ -26,7 +26,7 @@ export class Database implements OnModuleDestroy, OnModuleInit {
   async transaction<T>(actor: Actor, callback: (transaction: Tx) => Promise<T>): Promise<T> {
     return this.client.$transaction(
       async (transaction) => {
-        await transaction.$executeRaw`SELECT set_config('regi.tenant',${actor.tenantId},true), set_config('regi.stores',${actor.stores.join(',')},true), set_config('regi.all_stores',${String(['admin', 'headquarters'].includes(actor.role))},true)`;
+        await transaction.$executeRaw`SELECT set_config('regi.tenant',${actor.tenantId},true), set_config('regi.stores',${actor.stores.join(',')},true), set_config('regi.all_stores',${String(['admin', 'headquarters'].includes(actor.role))},true), set_config('regi.role',${actor.role},true)`;
         await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${actor.tenantId},0))`;
         return callback(transaction);
       },

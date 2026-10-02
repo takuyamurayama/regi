@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { businessDate } from '@regi/core';
+import { OperationStatusDtoSchema } from '@regi/core/finance';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import { Purchases, Refunds, Management, Stocktakes, ReceiptCorrections } from './workflows';
@@ -10,6 +11,12 @@ import { Table } from './Table';
 import { yen } from './presentation';
 import { reportPeriod } from './report-period';
 import { readApiResponse, networkError } from './api-response';
+import { ActionIntents, type IntentDescriptor } from './action-intent';
+import { webActor, webStores, webTenant, intentOrigin } from './web-context';
+import { SyncReviews } from './SyncReviews';
+import { Finance } from './Finance';
+import type { FinanceSection } from './finance-ui';
+import { isPage, readRoute, routeUrl, safeReturnPath, type WebRoute } from './routing';
 const initialPeriod = reportPeriod(location.search, import.meta.env.VITE_DEMO_HISTORY_END);
 const defaultTenant = '10000000-0000-4000-8000-000000000001';
 const navigation = [
@@ -23,6 +30,13 @@ const navigation = [
   '同期状況',
   '管理設定',
 ];
+const financeSections: Partial<Record<string, FinanceSection>> = {
+  '仕入明細・請求': 'invoices',
+  '買掛・支払': 'payables',
+  '仕入返品・減額': 'returns',
+  仕入先: 'suppliers',
+};
+const purchaseNavigation = ['発注・入荷', ...Object.keys(financeSections)];
 const navigationIcons: IconName[] = [
   'overview',
   'products',
@@ -43,12 +57,17 @@ const pageDescriptions: Record<string, string> = {
   'AI・需要予測': 'データを、判断の味方に。予測・提案・集計を根拠とともに。',
   同期状況: '店舗と本部の記録をつなぐ。同期位置と要確認の原記録を確認します。',
   管理設定: 'あなたの店舗に、フィットする設定。権限・契約・帳票を一か所で。',
+  '仕入明細・請求': '入荷と請求を照合し、税額と原資料を仕入記録へつなぎます。',
+  '買掛・支払': '仕入先への未払残高と、実際の支払・返金を確認します。',
+  '仕入返品・減額': '物品の返品と請求減額を区別し、数量と金額を記録します。',
+  仕入先: '仕入先の連絡先と取引条件を管理します。',
 };
 function App() {
-  const [page, setPage] = useState(
-      new URLSearchParams(location.search).get('page') ?? 'ダッシュボード',
-    ),
-    [settings, setSettings] = useState<any>(null),
+  const [route, setRoute] = useState(() =>
+    readRoute(location.pathname, location.search, import.meta.env.VITE_DEMO_HISTORY_END),
+  );
+  const page = route.page;
+  const [settings, setSettings] = useState<any>(null),
     [store, setStore] = useState(''),
     [data, setData] = useState<any>(null),
     [error, setError] = useState(''),
@@ -86,10 +105,10 @@ function App() {
     [aiResult, setAiResult] = useState<any>(null),
     [suggestions, setSuggestions] = useState<any[]>([]),
     [transfers, setTransfers] = useState<any[]>([]),
-    [reviews, setReviews] = useState<any[]>([]),
-    [included, setIncluded] = useState<Record<string, boolean>>({});
-  const [from, setFrom] = useState(initialPeriod.from),
-    [to, setTo] = useState(initialPeriod.to);
+    [reviews, setReviews] = useState<any[]>([]);
+  const [from, setFromValue] = useState(route.from),
+    [to, setToValue] = useState(route.to);
+  const [recoveryVersion, setRecoveryVersion] = useState(0);
   const [exportsOpen, setExportsOpen] = useState(false),
     [exportPollingError, setExportPollingError] = useState(''),
     [downloading, setDownloading] = useState('');
@@ -98,35 +117,160 @@ function App() {
     hasPendingExports = visibleExports.some((entry) =>
       ['queued', 'running'].includes(entry.status),
     );
-  const scope = JSON.stringify([page, store, from, to, subject, token]),
+  const credentialKey = JSON.stringify([
+      token,
+      subject,
+      sessionStorage.getItem('regi-dev-tenant') ?? defaultTenant,
+    ]),
+    settingsCredential = useRef('');
+  const activeSettings = settingsCredential.current === credentialKey ? settings : null;
+  const actor = webActor(activeSettings),
+    availableStores = webStores(activeSettings),
+    storeReady = Boolean(actor && availableStores.some((entry) => entry.id === store));
+  const scopeKey = JSON.stringify([
+      page,
+      store,
+      from,
+      to,
+      subject,
+      token,
+      route.invoiceId,
+      actor?.staffId,
+      actor?.role,
+      recoveryVersion,
+    ]),
+    scopeState = useRef({ key: scopeKey, version: 0 });
+  if (scopeState.current.key !== scopeKey)
+    scopeState.current = { key: scopeKey, version: scopeState.current.version + 1 };
+  const scope = scopeState.current,
     currentScope = useRef(scope);
   currentScope.current = scope;
-  async function api(path: string, body?: any, method = 'POST') {
-    const authorization = await freshToken(token);
+  const busyOwner = useRef<object | null>(null);
+  const authState = useRef({
+    token,
+    subject,
+    store,
+    tenant: sessionStorage.getItem('regi-dev-tenant') ?? defaultTenant,
+  });
+  authState.current = {
+    token,
+    subject,
+    store,
+    tenant: sessionStorage.getItem('regi-dev-tenant') ?? defaultTenant,
+  };
+  const productInstant = useRef<{ key: string; value: string } | null>(null);
+  const [, redrawIntents] = useState(0);
+  const intentsRef = useRef<ActionIntents | null>(null);
+  intentsRef.current ??= new ActionIntents(sessionStorage, () =>
+    redrawIntents((value) => value + 1),
+  );
+  const intents = intentsRef.current;
+  const intentScope = JSON.stringify([webTenant(settings), actor?.staffId, store]);
+  const otherPending = intents.pending().filter((entry) => {
+    const origin = intentOrigin(entry.scope);
+    return (
+      origin?.tenantId === webTenant(settings) &&
+      origin?.staffId === actor?.staffId &&
+      origin?.storeId !== store &&
+      availableStores.some((item) => item.id === origin?.storeId)
+    );
+  });
+  function updateRoute(next: WebRoute, replace = false) {
+    if (!next.notFound) history[replace ? 'replaceState' : 'pushState'](null, '', routeUrl(next));
+    setRoute(next);
+    setStore(next.storeId);
+    setFromValue(next.from);
+    setToValue(next.to);
+  }
+  function setPage(value: string) {
+    if (!isPage(value)) return;
+    setData(null);
+    updateRoute({
+      ...route,
+      page: value,
+      storeId: store,
+      from,
+      to,
+      invoiceId: undefined,
+      supplierId: undefined,
+      asOf: undefined,
+      status: undefined,
+    });
+  }
+  const setFrom = (value: string) =>
+    updateRoute({ ...route, storeId: store, from: value, to, demoDefault: false }, true);
+  const setTo = (value: string) =>
+    updateRoute({ ...route, storeId: store, from, to: value, demoDefault: false }, true);
+  async function transport(
+    path: string,
+    options: RequestInit,
+    captured = authState.current,
+    originatingStore?: string,
+  ): Promise<Response> {
+    if (!path.startsWith('/v1/') || path.startsWith('//') || /[\\\r\n]/.test(path))
+      throw new Error('APIの送信先を確認してください');
+    const authorization = await freshToken(captured.token);
+    if (
+      captured.subject !== authState.current.subject ||
+      captured.tenant !== authState.current.tenant ||
+      captured.token !== authState.current.token ||
+      (originatingStore !== undefined && originatingStore !== authState.current.store)
+    )
+      throw new Error('元の店舗・操作者で操作を確認してください');
+    const requestHeaders = new Headers(options.headers);
+    for (const name of ['authorization', 'x-tenant-id', 'x-staff-subject'])
+      requestHeaders.delete(name);
     let response: Response;
     try {
       response = await fetch(path, {
-        method: body ? method : 'GET',
+        ...options,
         headers: {
-          'Content-Type': 'application/json',
+          ...Object.fromEntries(requestHeaders.entries()),
           ...(authorization
             ? { Authorization: `Bearer ${authorization}` }
             : import.meta.env.DEV
               ? {
-                  'x-tenant-id': sessionStorage.getItem('regi-dev-tenant') ?? defaultTenant,
-                  'x-staff-subject': subject,
+                  'x-tenant-id': captured.tenant,
+                  'x-staff-subject': captured.subject,
                 }
               : {}),
         },
-        body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
       throw networkError();
     }
-    return readApiResponse(response);
+    return response;
+  }
+  async function api(path: string, body?: any, method = 'POST'): Promise<any> {
+    return readApiResponse(
+      await transport(path, {
+        method: body ? method : 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      }),
+    );
+  }
+  async function lookupOperation(entry: IntentDescriptor) {
+    const requestedScope = currentScope.current;
+    const value: unknown = await api(
+      `/v1/operations/${encodeURIComponent(entry.id)}/status?storeId=${encodeURIComponent(store)}`,
+    );
+    const status = OperationStatusDtoSchema.parse(value);
+    if (requestedScope !== currentScope.current) return;
+    if (status.operationId !== entry.id)
+      throw new Error('操作状態の応答を確認できません。未確認の操作を保持しています');
+    intents.confirmCommitted(entry.id, intentScope);
+    // No old request body or response is reconstructed. Remount the originating records instead.
+    setRecoveryVersion((value) => value + 1);
   }
   async function refresh() {
-    if (!store) return;
+    if (
+      !actor ||
+      !availableStores.some((entry) => entry.id === store) ||
+      route.notFound ||
+      from > to
+    )
+      return;
     const paths: Record<string, string> = {
       ダッシュボード: `/v1/reports/sales?storeId=${store}&from=${from}&to=${to}`,
       '在庫・移動': `/v1/inventory?storeId=${store}`,
@@ -154,7 +298,9 @@ function App() {
       api('/v1/settings'),
       api(`/v1/documents/transfer?storeId=${store}`),
       paths[page] ? api(paths[page]) : null,
-      page === '同期状況' ? api(`/v1/sync/reviews?storeId=${store}`) : [],
+      page === '同期状況' && actor.role !== 'cashier'
+        ? api(`/v1/sync/reviews?storeId=${store}`)
+        : [],
     ]);
     if (scope !== currentScope.current) return;
     setSettings(configuration);
@@ -168,56 +314,149 @@ function App() {
     setData(report);
     setReviews(reviewRows);
   }
-  async function action(callback: () => Promise<any>) {
-    if (busy) return;
+  async function action(callback: () => Promise<unknown>) {
+    if (busyOwner.current) return;
+    const owner = {},
+      requestedScope = currentScope.current;
+    busyOwner.current = owner;
     setBusy(true);
     setError('');
     try {
       await callback();
-      await refresh();
-    } catch (caught: any) {
-      setError(caught.message);
+      if (requestedScope === currentScope.current) await refresh();
+    } catch (caught: unknown) {
+      if (requestedScope === currentScope.current)
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : '処理結果を確認できません。原記録を確認してください',
+        );
     } finally {
-      setBusy(false);
+      if (busyOwner.current === owner) {
+        busyOwner.current = null;
+        if (requestedScope === currentScope.current) setBusy(false);
+      }
     }
   }
-  const post = async (path: string, body: any = {}) => {
+  function productEffectiveAt(): string {
+    if (effectiveAt) return new Date(effectiveAt).toISOString();
+    const key = JSON.stringify([intentScope, product, editing?.id, editing?.version]);
+    if (productInstant.current?.key !== key)
+      productInstant.current = { key, value: new Date().toISOString() };
+    return productInstant.current.value;
+  }
+  const post = async (path: string, body: unknown = {}, method = 'POST') => {
+    if (typeof body !== 'object' || body === null || Array.isArray(body))
+      throw new Error('送信内容を確認してください');
+    if (!actor || !availableStores.some((entry) => entry.id === store))
+      throw new Error('操作者と所属店舗を確認してから送信してください');
+    const supplied = body as Record<string, unknown>;
     const requestedScope = currentScope.current,
-      result = await api(path, { operationId: crypto.randomUUID(), storeId: store, ...body });
+      capturedAuth = authState.current,
+      originatingStore = store;
+    const payload: Record<string, unknown> = structuredClone({
+      ...(/^\/v1\/suppliers(?:\/|$)/.test(path) ? {} : { storeId: store }),
+      ...supplied,
+    });
+    if ('storeId' in payload && payload.storeId !== originatingStore)
+      throw new Error('元の店舗で操作を確認してください');
+    const result = await intents.run({
+      scope: intentScope,
+      path,
+      method,
+      returnPath: routeUrl({ ...route, storeId: store, from, to }),
+      input: payload,
+      operationId: typeof payload.operationId === 'string' ? payload.operationId : undefined,
+      active: () => requestedScope === currentScope.current,
+      send: async (id) =>
+        readApiResponse(
+          await transport(
+            path,
+            {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...payload, operationId: id }),
+            },
+            capturedAuth,
+            originatingStore,
+          ),
+        ),
+    });
     if (path === '/v1/exports' && requestedScope === currentScope.current) {
-      setExports((current) => [result, ...current.filter((entry) => entry.id !== result.id)]);
+      const exportResult = result as { id: string };
+      setExports((current) => [
+        exportResult,
+        ...current.filter((entry) => entry.id !== exportResult.id),
+      ]);
       setExportsOpen(true);
       setExportPollingError('');
       requestAnimationFrame(() => exportPanel.current?.scrollIntoView({ block: 'start' }));
     }
     return result;
   };
+  async function fileRequest(
+    path: string,
+    options: { method?: string; body?: Blob; headers?: Record<string, string> } = {},
+  ): Promise<Response> {
+    const method = options.method ?? 'GET',
+      capturedAuth = authState.current,
+      originatingStore = store,
+      requestedScope = currentScope.current;
+    if (!actor || !availableStores.some((entry) => entry.id === store))
+      throw new Error('操作者と所属店舗を確認してから送信してください');
+    const normalizedHeaders = new Headers(options.headers);
+    const operationId = normalizedHeaders.get('x-regi-operation-id') ?? undefined;
+    normalizedHeaders.delete('x-regi-operation-id');
+    const headers = Object.fromEntries(normalizedHeaders.entries());
+    if (['GET', 'HEAD'].includes(method)) {
+      const response = await transport(path, { method, headers }, capturedAuth);
+      if (!response.ok) await readApiResponse(response);
+      return response;
+    }
+    const body = options.body?.slice(),
+      hash = body
+        ? Array.from(
+            new Uint8Array(await crypto.subtle.digest('SHA-256', await body.arrayBuffer())),
+            (byte) => byte.toString(16).padStart(2, '0'),
+          ).join('')
+        : '';
+    const response = await intents.run({
+      scope: intentScope,
+      path,
+      method,
+      returnPath: routeUrl({ ...route, storeId: store, from, to }),
+      input: {
+        hash,
+        headers: Object.fromEntries(
+          Object.entries(headers).filter(([key]) => key.toLowerCase() !== 'x-regi-operation-id'),
+        ),
+      },
+      operationId,
+      active: () => requestedScope === currentScope.current,
+      send: async (id) => {
+        const response = await transport(
+          path,
+          { method, body, headers: { ...headers, 'X-Regi-Operation-Id': id } },
+          capturedAuth,
+          originatingStore,
+        );
+        if (!response.ok) await readApiResponse(response);
+        const value: unknown = await readApiResponse(response.clone());
+        if (typeof value !== 'object' || value === null)
+          throw new Error('保存結果を確認できません。原記録を確認してください');
+        return response;
+      },
+    });
+    return response.clone();
+  }
   async function downloadExport(entry: any) {
     if (downloading) return;
     setDownloading(entry.id);
     setError('');
     try {
-      const authorization = await freshToken(token);
-      let response: Response;
-      try {
-        response = await fetch(`/v1/exports/${entry.id}/download`, {
-          headers: authorization
-            ? { Authorization: `Bearer ${authorization}` }
-            : import.meta.env.DEV
-              ? {
-                  'x-tenant-id': sessionStorage.getItem('regi-dev-tenant') ?? defaultTenant,
-                  'x-staff-subject': subject,
-                }
-              : {},
-        });
-      } catch {
-        throw networkError();
-      }
-      if (!response.ok) {
-        await readApiResponse(response);
-        return;
-      }
+      const response = await fileRequest(`/v1/exports/${entry.id}/download`);
       const blob = await response.blob();
+      if (scope !== currentScope.current) return;
       if (!blob.size) throw new Error('帳票が空です。出力履歴から再作成してください');
       const url = URL.createObjectURL(blob),
         anchor = document.createElement('a');
@@ -227,10 +466,11 @@ function App() {
       anchor.click();
       anchor.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (caught: any) {
-      setError(caught.message);
+    } catch (caught: unknown) {
+      if (scope === currentScope.current)
+        setError(caught instanceof Error ? caught.message : '帳票を取得できません');
     } finally {
-      setDownloading('');
+      if (scope === currentScope.current) setDownloading('');
     }
   }
   useEffect(() => {
@@ -239,10 +479,20 @@ function App() {
     api('/v1/settings')
       .then((result) => {
         if (active) {
+          settingsCredential.current = credentialKey;
           setSettings(result);
-          setStore(
-            new URLSearchParams(location.search).get('storeId') ?? result.stores[0]?.id ?? '',
+          const requested = readRoute(
+            location.pathname,
+            location.search,
+            import.meta.env.VITE_DEMO_HISTORY_END,
           );
+          const availableStores = webStores(result);
+          const selectedStore = requested.storeId || availableStores[0]?.id || '';
+          if (requested.notFound || !availableStores.some((entry) => entry.id === selectedStore)) {
+            setStore('');
+            return;
+          }
+          updateRoute({ ...requested, storeId: selectedStore }, true);
         }
       })
       .catch((caught) => {
@@ -252,6 +502,53 @@ function App() {
       active = false;
     };
   }, [token, subject]);
+  useEffect(() => {
+    const restore = () => {
+      const next = readRoute(
+        location.pathname,
+        location.search,
+        import.meta.env.VITE_DEMO_HISTORY_END,
+      );
+      setRoute(next);
+      setStore(next.storeId);
+      setFromValue(next.from);
+      setToValue(next.to);
+    };
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, []);
+  useEffect(() => {
+    busyOwner.current = null;
+    setBusy(false);
+    setError('');
+    setSelected('');
+    setReason('');
+    setReference('');
+    setTarget('');
+    setShiftId('');
+    setPin('');
+    setQuantity('1');
+    setCash('10000');
+    setEditing(null);
+    setEffectiveAt('');
+    setDownloading('');
+    setProduct({
+      sku: '',
+      name: '',
+      jan: '',
+      price: '',
+      cost: '',
+      taxCode: 'standard',
+      stockManaged: true,
+    });
+    setOrders([]);
+    setSales([]);
+    setRefunds([]);
+    setShifts([]);
+    setTransfers([]);
+    setReviews([]);
+    setData(null);
+  }, [scope.version]);
   useEffect(() => {
     callback()
       .then((result) => {
@@ -263,8 +560,11 @@ function App() {
       .catch((caught) => setError(caught.message));
   }, []);
   useEffect(() => {
-    refresh().catch((caught) => setError(caught.message));
-  }, [page, store, from, to]);
+    refresh().catch((caught: unknown) => {
+      if (scope === currentScope.current)
+        setError(caught instanceof Error ? caught.message : '読取結果を確認できません');
+    });
+  }, [page, store, from, to, settings?.tenant.id, recoveryVersion]);
   useEffect(() => {
     setExportPollingError('');
     if (!store || !hasPendingExports) return;
@@ -368,9 +668,15 @@ function App() {
           {navigation.map((item, index) => (
             <button
               aria-label={item}
-              aria-current={item === page ? 'page' : undefined}
+              aria-current={
+                item === page || (item === '発注・入荷' && financeSections[page])
+                  ? 'page'
+                  : undefined
+              }
               title={item}
-              className={item === page ? 'active' : ''}
+              className={
+                item === page || (item === '発注・入荷' && financeSections[page]) ? 'active' : ''
+              }
               onClick={() => {
                 setData(null);
                 setPage(item);
@@ -416,9 +722,21 @@ function App() {
                 disabled={busy}
                 aria-label="店舗"
                 value={store}
-                onChange={(event) => setStore(event.target.value)}
+                onChange={(event) => {
+                  setData(null);
+                  updateRoute({
+                    ...route,
+                    storeId: event.target.value,
+                    from,
+                    to,
+                    invoiceId: undefined,
+                    supplierId: undefined,
+                    status: undefined,
+                  });
+                }}
               >
-                {settings?.stores.map((entry: any) => (
+                <option value="">店舗を選択</option>
+                {availableStores.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {entry.name}
                   </option>
@@ -437,6 +755,42 @@ function App() {
           </div>
         </header>
         <div className="content" aria-busy={busy}>
+          {settings && !storeReady && !route.notFound && (
+            <div role="alert" className="error">
+              この店舗・画面は表示できません。所属店舗とURLを確認してください
+            </div>
+          )}
+          {otherPending.map((entry) => {
+            const origin = intentOrigin(entry.scope),
+              savedPath = safeReturnPath(entry.returnPath, location.origin);
+            return (
+              <section
+                key={entry.id}
+                aria-label="別店舗の未確認操作"
+                className="notice intent-recovery"
+              >
+                <b>店舗切替前の操作の結果が未確認です</b>
+                <p>
+                  {availableStores.find((item) => item.id === origin?.storeId)?.name}{' '}
+                  の原記録を確認してください。新しい店舗への再送は行いません。
+                </p>
+                <button
+                  onClick={() => {
+                    const url = new URL(savedPath, location.origin),
+                      next = readRoute(
+                        url.pathname,
+                        url.search,
+                        import.meta.env.VITE_DEMO_HISTORY_END,
+                      );
+                    if (origin && availableStores.some((item) => item.id === origin.storeId))
+                      updateRoute({ ...next, storeId: origin.storeId });
+                  }}
+                >
+                  元の店舗で操作を確認
+                </button>
+              </section>
+            );
+          })}
           {error && (
             <div role="alert" className="error">
               {error}
@@ -445,6 +799,69 @@ function App() {
           {busy && (
             <div role="status" className="notice">
               保存中です。同じ操作を重ねずお待ちください。
+            </div>
+          )}
+          {intents.pending(intentScope).map((entry) => (
+            <section className="notice intent-recovery" key={entry.id} aria-label="未確認の操作">
+              <b>先の操作の結果が未確認です</b>
+              <p>原記録を再取得して確認してください。同じ操作の再確認には元の操作IDを使います。</p>
+              <div className="row">
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    void action(() => lookupOperation(entry));
+                  }}
+                >
+                  保存結果を照会
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    void action(refresh);
+                  }}
+                >
+                  原記録を再取得
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    void action(() => intents.retry(entry.id, intentScope));
+                  }}
+                >
+                  同じ操作を再確認
+                </button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    const target = new URL(
+                      safeReturnPath(entry.returnPath, location.origin),
+                      location.origin,
+                    );
+                    updateRoute(readRoute(target.pathname, target.search));
+                  }}
+                >
+                  元の画面へ戻る
+                </button>
+              </div>
+              <details>
+                <summary>問い合わせ用の操作情報</summary>
+                <code>{entry.id}</code>
+              </details>
+            </section>
+          ))}
+          {intents.acknowledged(intentScope) && !busy && (
+            <div className="notice intent-completed" role="status">
+              <span>
+                保存済み・原記録の再取得。表示の再取得に失敗しても、保存した操作は重ねません。
+              </span>
+              <button
+                onClick={() => {
+                  intents.startNew(intentScope);
+                  productInstant.current = null;
+                }}
+              >
+                新しい操作を開始
+              </button>
             </div>
           )}
           {(settings?.demo?.synthetic || initialPeriod.demoDefault) && (
@@ -462,10 +879,14 @@ function App() {
                 <button
                   disabled={busy}
                   onClick={() => {
-                    setFrom(settings.demo.startDay);
-                    setTo(settings.demo.endDay);
                     setData(null);
-                    setPage('ダッシュボード');
+                    updateRoute({
+                      ...route,
+                      page: 'ダッシュボード',
+                      storeId: store,
+                      from: settings.demo.startDay,
+                      to: settings.demo.endDay,
+                    });
                   }}
                 >
                   デモ期間を表示
@@ -473,14 +894,34 @@ function App() {
               )}
             </section>
           )}
-          {page !== 'ダッシュボード' && (
+          {purchaseNavigation.includes(page) && (
+            <nav className="purchase-navigation" aria-label="仕入業務">
+              {purchaseNavigation.map((item) => (
+                <button
+                  key={item}
+                  aria-current={item === page ? 'page' : undefined}
+                  className={item === page ? 'active' : ''}
+                  onClick={() => setPage(item)}
+                >
+                  {item}
+                </button>
+              ))}
+            </nav>
+          )}
+          {page !== 'ダッシュボード' && !financeSections[page] && (
             <div className="page-intro">
               <span className="eyebrow">商いの記録</span>
               <h2>{page}</h2>
               <p>{pageDescriptions[page]}</p>
             </div>
           )}
-          {page === 'ダッシュボード' && (
+          {route.notFound && (
+            <section role="alert">
+              <h2>画面が見つかりません</h2>
+              <p>URLと店舗の指定を確認してください。</p>
+            </section>
+          )}
+          {page === 'ダッシュボード' && !route.notFound && (
             <Dashboard
               report={data}
               sales={sales}
@@ -493,6 +934,40 @@ function App() {
             />
           )}
 
+          {financeSections[page] &&
+            !route.notFound &&
+            actor &&
+            availableStores.some((entry) => entry.id === store) && (
+              <Finance
+                key={`finance:${scope.version}`}
+                section={financeSections[page]}
+                invoiceId={route.invoiceId}
+                store={store}
+                scopeKey={`${scopeKey}:${scope.version}`}
+                actorRole={actor.role}
+                actorStaffId={actor.staffId}
+                busy={busy}
+                api={api}
+                post={post}
+                fileRequest={fileRequest}
+                action={action}
+                navigate={(path) => {
+                  const safe = safeReturnPath(path, location.origin);
+                  if (safe === '/' && path !== '/')
+                    throw new Error('画面の移動先を確認してください');
+                  const url = new URL(safe, location.origin);
+                  const next = readRoute(
+                    url.pathname,
+                    url.search,
+                    import.meta.env.VITE_DEMO_HISTORY_END,
+                  );
+                  if (!next.storeId) next.storeId = store;
+                  if (next.notFound || !availableStores.some((entry) => entry.id === next.storeId))
+                    throw new Error('元の店舗で操作を確認してください');
+                  updateRoute(next);
+                }}
+              />
+            )}
           {page === '商品・価格' && (
             <>
               <section>
@@ -534,19 +1009,16 @@ function App() {
                   </label>
                 </div>
                 <button
-                  disabled={busy}
+                  disabled={busy || !storeReady}
                   className="primary"
                   onClick={() =>
                     action(() =>
-                      api(
+                      post(
                         editing ? `/v1/products/${editing.id}` : '/v1/products',
                         {
-                          operationId: crypto.randomUUID(),
                           ...product,
                           jan: product.jan || null,
-                          effectiveAt: effectiveAt
-                            ? new Date(effectiveAt).toISOString()
-                            : new Date().toISOString(),
+                          effectiveAt: productEffectiveAt(),
                           version: editing?.version,
                         },
                         editing ? 'PATCH' : 'POST',
@@ -627,15 +1099,18 @@ function App() {
           {page === '発注・入荷' && (
             <>
               <Purchases
+                key={`purchases:${scope.version}`}
                 api={api}
                 post={post}
                 action={action}
-                busy={busy}
+                busy={busy || !storeReady}
                 products={products}
                 orders={orders}
                 store={store}
+                actorRole={actor?.role}
               />
               <ReceiptCorrections
+                key={`receipts:${scope.version}`}
                 api={api}
                 post={post}
                 action={action}
@@ -695,6 +1170,7 @@ function App() {
                 <p>残高の直接上書きは行いません。マイナス在庫は確認・調整対象です。</p>
               </section>
               <Stocktakes
+                key={`stocktakes:${scope.version}`}
                 api={api}
                 post={post}
                 action={action}
@@ -733,6 +1209,7 @@ function App() {
           )}
           {page === '返品・取引' && (
             <Refunds
+              key={`refunds:${scope.version}`}
               api={api}
               post={post}
               action={action}
@@ -771,7 +1248,13 @@ function App() {
                           opening: cash,
                           pin,
                         });
-                        setShiftId(result.id);
+                        if (
+                          typeof result === 'object' &&
+                          result !== null &&
+                          'id' in result &&
+                          typeof result.id === 'string'
+                        )
+                          setShiftId(result.id);
                       })
                     }
                   >
@@ -999,69 +1482,17 @@ function App() {
             </>
           )}
           {page === '同期状況' && (
-            <>
-              <section>
-                <h3>要確認イベント / 原記録の管理者再検証</h3>
-                <input
-                  placeholder="決済結果・原記録照合の承認理由"
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                />
-                {reviews.map((event) => (
-                  <div className="order" key={event.id}>
-                    <div>
-                      <b>{event.id}</b>
-                      <small>
-                        {event.result.code} / {event.result.message}
-                      </small>
-                    </div>
-                    {['STOCKTAKE_RECONCILE', 'STOCKTAKE_ACTIVE'].includes(event.result.code) && (
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={included[event.id] ?? false}
-                          onChange={(change) =>
-                            setIncluded({ ...included, [event.id]: change.target.checked })
-                          }
-                        />
-                        この売上の在庫減少は実査済み数量に含まれる（未チェック=含まれない）
-                      </label>
-                    )}
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        action(() =>
-                          post(`/v1/sync/reviews/${event.id}/retry`, {
-                            reason,
-                            ...(['STOCKTAKE_RECONCILE', 'STOCKTAKE_ACTIVE'].includes(
-                              event.result.code,
-                            )
-                              ? { inventoryIncludedInCount: included[event.id] ?? false }
-                              : {}),
-                          }),
-                        )
-                      }
-                    >
-                      理由付きで原記録を再検証
-                    </button>
-                  </div>
-                ))}
-                <h3>端末同期状態</h3>
-                <Table
-                  headers={['端末', '最終同期', '未送信', '販売停止']}
-                  rows={
-                    settings?.devices.map((entry: any) => [
-                      entry.name,
-                      entry.last_sync ?? '未同期',
-                      entry.pending,
-                      entry.stopped ? '停止' : '販売可',
-                    ]) ?? []
-                  }
-                />
-                <p>端末時計ではなく法人コミット順カーソルで差分を取得します。</p>
-                <p>現在の同期位置: {data?.cursor ?? '—'}</p>
-              </section>
-            </>
+            <SyncReviews
+              key={`sync:${scope.version}`}
+              records={reviews}
+              devices={settings?.devices ?? []}
+              cursor={data?.cursor}
+              store={store}
+              actor={actor}
+              busy={busy}
+              post={post}
+              action={action}
+            />
           )}
           {page === '管理設定' && (
             <>
@@ -1094,6 +1525,7 @@ function App() {
                   <button
                     onClick={() => {
                       logout();
+                      intents.forgetBodies();
                       setProducts([]);
                       setOrders([]);
                       setSales([]);
@@ -1148,6 +1580,7 @@ function App() {
                 </div>
               </section>
               <Management
+                key={`management:${scope.version}`}
                 api={api}
                 post={post}
                 action={action}
@@ -1158,96 +1591,98 @@ function App() {
               />
             </>
           )}
-          <section className="exports" ref={exportPanel}>
-            <div className="section-heading">
-              <div className="export-heading">
-                <Icon name="download" />
-                <div>
-                  <h3>データ・帳票出力</h3>
-                  <p>店舗の記録を、必要な形式で。</p>
+          {!financeSections[page] && (
+            <section className="exports" ref={exportPanel}>
+              <div className="section-heading">
+                <div className="export-heading">
+                  <Icon name="download" />
+                  <div>
+                    <h3>データ・帳票出力</h3>
+                    <p>店舗の記録を、必要な形式で。</p>
+                  </div>
+                </div>
+                <div className="export-actions">
+                  <button
+                    disabled={busy}
+                    onClick={() => action(() => post('/v1/exports', { format: 'csv' }))}
+                  >
+                    取引CSVを作成
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => action(() => post('/v1/exports', { format: 'bundle' }))}
+                  >
+                    CSV・保存帳票一式を作成
+                  </button>
                 </div>
               </div>
-              <div className="export-actions">
-                <button
-                  disabled={busy}
-                  onClick={() => action(() => post('/v1/exports', { format: 'csv' }))}
-                >
-                  取引CSVを作成
-                </button>
-                <button
-                  disabled={busy}
-                  onClick={() => action(() => post('/v1/exports', { format: 'bundle' }))}
-                >
-                  CSV・保存帳票一式を作成
-                </button>
-              </div>
-            </div>
-            <details
-              className="export-history"
-              open={exportsOpen}
-              onToggle={(event) => setExportsOpen(event.currentTarget.open)}
-            >
-              <summary>
-                <Icon name="folder" />
-                出力履歴 <span className="export-count">{visibleExports.length}</span>
-                <Icon name="chevron" />
-              </summary>
-              <p role="status">
-                {hasPendingExports
-                  ? '帳票を作成中です。完了状態は自動更新されます。'
-                  : '作成完了した帳票は、下のダウンロードボタンで保存できます。'}{' '}
-                一式出力はPDF・CSVを含む圧縮ファイルです。
-              </p>
-              {exportPollingError && (
-                <p role="alert" className="error">
-                  {exportPollingError}
+              <details
+                className="export-history"
+                open={exportsOpen}
+                onToggle={(event) => setExportsOpen(event.currentTarget.open)}
+              >
+                <summary>
+                  <Icon name="folder" />
+                  出力履歴 <span className="export-count">{visibleExports.length}</span>
+                  <Icon name="chevron" />
+                </summary>
+                <p role="status">
+                  {hasPendingExports
+                    ? '帳票を作成中です。完了状態は自動更新されます。'
+                    : '作成完了した帳票は、下のダウンロードボタンで保存できます。'}{' '}
+                  一式出力はPDF・CSVを含む圧縮ファイルです。
                 </p>
-              )}
-              {visibleExports.map((entry) => (
-                <div className="row export-record" data-export-id={entry.id} key={entry.id}>
-                  <span>
-                    {(
-                      {
-                        csv: '取引CSV',
-                        bundle: 'CSV・保存帳票一式',
-                        'purchase-pdf': '発注書PDF',
-                        'receipt-pdf': '領収書PDF',
-                        'refund-pdf': '返還伝票PDF',
-                      } as Record<string, string>
-                    )[entry.body.format] ?? entry.body.format}{' '}
-                    /{' '}
-                    {entry.status === 'completed'
-                      ? '作成完了'
-                      : entry.body.error
-                        ? '作成エラー・再試行待ち'
-                        : entry.status === 'running'
-                          ? '作成中'
-                          : '作成待ち'}
-                    <small>
-                      出力番号 {entry.id.slice(0, 8)}
-                      {entry.created_at
-                        ? ` / ${new Date(entry.created_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`
-                        : ''}
-                    </small>
-                  </span>
-                  {entry.status === 'completed' && (
-                    <button
-                      disabled={busy || Boolean(downloading)}
-                      onClick={() => downloadExport(entry)}
-                    >
-                      {downloading === entry.id
-                        ? 'ダウンロード中…'
-                        : entry.body.extension === 'pdf'
-                          ? 'PDFをダウンロード'
-                          : entry.body.extension === 'csv'
-                            ? 'CSVをダウンロード'
-                            : '一式をダウンロード'}
-                    </button>
-                  )}
-                </div>
-              ))}
-            </details>
-          </section>
+                {exportPollingError && (
+                  <p role="alert" className="error">
+                    {exportPollingError}
+                  </p>
+                )}
+                {visibleExports.map((entry) => (
+                  <div className="row export-record" data-export-id={entry.id} key={entry.id}>
+                    <span>
+                      {(
+                        {
+                          csv: '取引CSV',
+                          bundle: 'CSV・保存帳票一式',
+                          'purchase-pdf': '発注書PDF',
+                          'receipt-pdf': '領収書PDF',
+                          'refund-pdf': '返還伝票PDF',
+                        } as Record<string, string>
+                      )[entry.body.format] ?? entry.body.format}{' '}
+                      /{' '}
+                      {entry.status === 'completed'
+                        ? '作成完了'
+                        : entry.body.error
+                          ? '作成エラー・再試行待ち'
+                          : entry.status === 'running'
+                            ? '作成中'
+                            : '作成待ち'}
+                      <small>
+                        出力番号 {entry.id.slice(0, 8)}
+                        {entry.created_at
+                          ? ` / ${new Date(entry.created_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`
+                          : ''}
+                      </small>
+                    </span>
+                    {entry.status === 'completed' && (
+                      <button
+                        disabled={busy || Boolean(downloading)}
+                        onClick={() => downloadExport(entry)}
+                      >
+                        {downloading === entry.id
+                          ? 'ダウンロード中…'
+                          : entry.body.extension === 'pdf'
+                            ? 'PDFをダウンロード'
+                            : entry.body.extension === 'csv'
+                              ? 'CSVをダウンロード'
+                              : '一式をダウンロード'}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </details>
+            </section>
+          )}
           <footer>
             <span>
               <strong>REGI</strong> · 店舗運営を、もっとシンプルに。

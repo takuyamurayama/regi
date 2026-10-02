@@ -56,3 +56,39 @@ test('browser PKCE rejects mismatched and expired state, refreshes once and clea
   auth.logout();
   assert.equal(values.size, 0);
 });
+
+void test('browser logout rejects stale refresh result without reviving credentials', async () => {
+  const values = new Map<string, string>([
+    ['regi-oauth-session', JSON.stringify({ token: 'old', refresh: 'refresh', expiresAt: 0 })],
+  ]);
+  let resolve!: (response: Response) => void;
+  const pending = new Promise<Response>((completion) => {
+    resolve = completion;
+  });
+  const auth = new BrowserAuth(
+    {
+      domain: 'https://test.auth.example',
+      clientId: 'public-client',
+      redirect: 'https://regi.example/',
+    },
+    {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+      removeItem: (key) => {
+        values.delete(key);
+      },
+    },
+    () => pending,
+  );
+  const refresh = auth.token('');
+  auth.logout();
+  resolve(
+    new Response(JSON.stringify({ id_token: 'stale', expires_in: 3600 }), {
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  );
+  await assert.rejects(refresh, /認証|ログイン/);
+  assert.equal(values.size, 0);
+});

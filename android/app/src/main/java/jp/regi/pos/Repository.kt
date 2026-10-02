@@ -13,6 +13,8 @@ import org.bouncycastle.crypto.generators.SCrypt
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class SalePreview(val lines: List<SaleLine>, val mode: String, val calculation: Total)
+
 class Repository(
     context: Context,
     val database: PosDatabase = PosDatabase.get(context),
@@ -222,24 +224,25 @@ class Repository(
         dao.metadata(Metadata("sequence", sequence.toString()))
     }
 
-    suspend fun begin(
+    suspend fun preview(lines: List<SaleLine>, discount: String): SalePreview {
+        val snapshot = snapshot()
+        return previewAt(lines, discount, snapshot, effectiveNow())
+    }
+
+    private suspend fun previewAt(
         lines: List<SaleLine>,
         discount: String,
-        method: String,
-        heldId: String? = null,
-        status: String = "checking",
-        buyerName: String = "",
-    ): Checkout {
-        assertSaleAllowed()
-        require(status in listOf("checking", "draft"))
-        if (heldId != null) require(dao.checkoutById(heldId)?.status == "draft") { "保留中の会計ではありません" }
-        val snapshot = snapshot()
+        snapshot: JSONObject,
+        now: Instant,
+    ): SalePreview {
         val mode =
             snapshot.getJSONObject("settings").getJSONObject("tenant").getString("price_mode")
-        val now = effectiveNow()
         val rates = snapshot.getJSONObject("settings").getJSONArray("taxRates")
         val refreshed =
             lines.map { line ->
+                require(line.taxContext in listOf("master", "dine-in", "takeaway")) {
+                    "税区分を確認してください"
+                }
                 val product = dao.product(line.productId) ?: error("商品を同期してください")
                 val scheduled =
                     dao.metadataPrefix("scheduledPrice-${line.productId}-")
@@ -263,13 +266,38 @@ class Repository(
                     price = scheduled?.optString("price") ?: product.price,
                     cost = scheduled?.optString("cost") ?: product.cost,
                     rateBps = applicable?.getInt("rate_bps") ?: product.rateBps,
+                    taxCode = taxCode.takeIf { it.isNotBlank() },
+                    reducedTarget = if (taxCode.isBlank()) null else taxCode == "reduced",
                 )
             }
-        val total = Money.calculate(refreshed, discount, mode)
+        return SalePreview(refreshed, mode, Money.calculate(refreshed, discount, mode))
+    }
+
+    suspend fun begin(
+        lines: List<SaleLine>,
+        discount: String,
+        method: String,
+        heldId: String? = null,
+        status: String = "checking",
+        buyerName: String = "",
+        expectedPreview: SalePreview? = null,
+    ): Checkout {
+        assertSaleAllowed()
+        require(status in listOf("checking", "draft") && method in listOf("cash", "card", "qr"))
+        if (heldId != null) require(dao.checkoutById(heldId)?.status == "draft") { "保留中の会計ではありません" }
+        val snapshot = snapshot()
+        val now = effectiveNow()
+        val preview = previewAt(lines, discount, snapshot, now)
+        require(expectedPreview == null || expectedPreview == preview) {
+            "価格・税率が更新されました。最新の合計を確認して再度支払い開始を選んでください"
+        }
+        val mode = preview.mode
+        val total = preview.calculation
         val receipt =
             snapshot.optJSONObject("receipt")
                 ?: snapshot.getJSONObject("settings").optJSONObject("receipt")
                 ?: JSONObject()
+        require(buyerName.length <= 200) { "帳票宛名は200文字以内で入力してください" }
         require(!receipt.optBoolean("buyerRequired") || buyerName.isNotBlank()) { "帳票宛名を入力してください" }
         val body =
             JSONObject()
@@ -297,6 +325,10 @@ class Repository(
                         .put("cost", line.cost)
                         .put("stockManaged", line.stockManaged)
                         .put("taxContext", line.taxContext)
+                        .apply {
+                            line.taxCode?.let { put("taxCode", it) }
+                            line.reducedTarget?.let { put("reducedTarget", it) }
+                        }
                         .put("net", paid.net)
                         .put("allocatedDiscount", paid.allocatedDiscount)
                         .put("paid", paid.paid)

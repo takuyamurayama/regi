@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -139,11 +140,16 @@ class BackupPostgresTests(unittest.TestCase):
         self.directory = Path(self.temporary.name)
         self.database = "regi_backup_test_" + uuid.uuid4().hex[:12]
         self.created = {self.database}
+        migration_directory = self.directory / "d0-migrations"
+        migration_directory.mkdir()
+        for path in sorted((ROOT / "apps/api/prisma/migrations").glob("[0-9][0-9][0-9]_*/migration.sql")):
+            if path.parent.name[:3] <= "007":
+                shutil.copytree(path.parent, migration_directory / path.parent.name)
         admin = urlparse(os.environ.get("SANDBOX_TEST_ADMIN_DATABASE_URL", "postgresql://postgres@localhost:5432/postgres"))
         self.config = {"backend": "container" if os.environ.get("POSTGRES_TEST_CONTAINER") else "local",
                        "database": self.database, "user": unquote(admin.username or "postgres"),
                        "privateDirectory": str(self.directory / "private"),
-                       "migrationDirectory": str(ROOT / "apps/api/prisma/migrations"),
+                       "migrationDirectory": str(migration_directory),
                        "backupBucket": "synthetic-backups", "backupRegion": "ap-northeast-1"}
         self.configuration = self.directory / "config.json"
         backup.private_json(self.configuration, self.config)

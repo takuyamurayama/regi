@@ -184,6 +184,12 @@ NODE_ENV=production npm run build -w @regi/web
 
 ビルド済み `apps/web/dist/` だけをMacへ転送し、deploymentのWebバケットへ非公開のままuploadします。index.htmlは `no-cache`、hash付きassetsはimmutableで長期cacheにします。変更後はCloudFront invalidationを行い、古いログイン設定が残っていないことを確認します。API Dockerイメージの再作成は不要です。ブラウザーへdev headers、AWSキー、デモPIN、owner URLを埋め込みません。
 
+Webの正規URLは `/dashboard`、`/products`、`/purchases/orders`、`/inventory`、`/sales`、`/shifts`、`/ai`、`/sync`、`/settings` と、仕入管理の `/purchases/invoices`・`/purchases/invoices/<UUID>`・`/purchases/payables`・`/purchases/returns`・`/purchases/suppliers` です。店舗・期間はquery、請求の原記録IDはpathへ保存します。従来の `/?page=発注・入荷&storeId=...` はWebが同じ店舗・期間の正規URLへ置換します。
+
+`infra/sandbox/web-route-rewrite.js` の CloudFront Function は **default Web behavior の viewer-request だけ**に関連付け、既知のWeb pathのGET/HEADを `/index.html` へ書き換えます。queryや認証情報には触れず、`/v1/*`・`/health` のAPI behavior、assets、未知pathと他methodは変更しません。URI変更は元のbehavior／originを変えない仕様なので、APIには関数を付けず、distribution全体のcustom error responseも設定しません。APIの403/413/500をHTML200へ変換しないことをmockで検査します。[AWSのevent仕様](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/functions-event-structure.html)、[viewer-request rewriteの公式例](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/example_cloudfront_functions_url_rewrite_single_page_apps_section.html)
+
+Macの運営者はWeb配布と同じ変更でTerraform planを確認し、このFunctionの作成とdefault behavior関連付けをapplyしてください。適用・invalidation後に、正規URLの直接起動と再読み込み、ブラウザーの戻る/進む、旧 `?page=` URL、請求IDのdeep linkを確認します。APIの未認証403等とassetsは元の応答を保つことも確認し、結果を記録します。VMでは実Functionソースのunit試験とprovider mockまで検証し、AWSへの適用・CloudFront配信確認は行いません。
+
 合成データの期間と「実在の販売実績ではありません」を常時表示します。「デモ期間を表示」で84日全体を選べます。期間を今日へ変えると実際に今日成立した取引だけになり、過去売上を今日へ移しません。返品日は別集計なので今日の返品があれば純売上がマイナスになる場合があります。
 
 ## 検証・起動・停止

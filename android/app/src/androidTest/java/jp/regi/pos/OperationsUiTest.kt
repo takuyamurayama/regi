@@ -55,7 +55,7 @@ class OperationsUiTest {
         val names = listOf("画面商品A$suffix", "画面商品B$suffix")
         runBlocking {
             repository.network.configure(
-                "http://10.0.2.2:3000",
+                fixtureApiBaseUrl(),
                 "",
                 true,
                 fixture().getString("adminSubject"),

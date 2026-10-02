@@ -6,10 +6,17 @@ import { Artifacts } from './artifacts';
 import { Ai } from './ai';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { Finance } from './finance';
+import { FinanceFiles } from './finance-files';
+import { FinanceExports } from './finance-exports';
+import { z } from 'zod';
 async function main() {
   const database = new Database(),
     business = new Business(database),
     artifacts = new Artifacts(business),
+    financeFiles = new FinanceFiles(),
+    finance = new Finance(business, financeFiles),
+    financeExports = new FinanceExports(finance, business, financeFiles),
     ai = new Ai(business);
   await database.onModuleInit();
   const queue = new SQSClient({ region: process.env.AWS_REGION });
@@ -28,7 +35,15 @@ async function main() {
       );
       for (const message of result.Messages ?? [])
         try {
-          const job = JSON.parse(message.Body ?? '{}'),
+          const raw: unknown = JSON.parse(message.Body ?? '{}');
+          const job = z
+              .object({
+                id: z.uuid(),
+                tenantId: z.uuid(),
+                staffId: z.uuid(),
+                kind: z.literal('purchase-finance').optional(),
+              })
+              .parse(raw),
             candidate: Actor = {
               tenantId: job.tenantId,
               staffId: job.staffId,
@@ -37,13 +52,15 @@ async function main() {
               mfa: true,
             };
           const [staff] = await database.transaction(candidate, (transaction) =>
-            rows(
+            rows<{ role: Actor['role']; stores: string[] }>(
               transaction,
               sql`SELECT role,stores FROM staff WHERE id=${candidate.staffId}::uuid AND active`,
             ),
           );
           if (!staff) throw new Error('Worker actor revoked');
-          await artifacts.process({ ...candidate, role: staff.role, stores: staff.stores }, job.id);
+          const actor = { ...candidate, role: staff.role, stores: staff.stores };
+          if (job.kind === 'purchase-finance') await financeExports.process(actor, job.id);
+          else await artifacts.process(actor, job.id);
           await queue.send(
             new DeleteMessageCommand({
               QueueUrl: process.env.EXPORT_QUEUE_URL,
@@ -59,7 +76,7 @@ async function main() {
         const [staff] = await database.transaction(
           { ...scope, role: 'cashier', stores: [] },
           (transaction) =>
-            rows(
+            rows<{ role: Actor['role']; stores: string[] }>(
               transaction,
               sql`SELECT role,stores FROM staff WHERE id=${scope.staffId}::uuid AND active`,
             ),
@@ -67,6 +84,7 @@ async function main() {
         if (!staff) continue;
         const actor = { ...scope, role: staff.role, stores: staff.stores };
         await artifacts.tick(actor);
+        await financeExports.tick(actor);
         await ai.recover(actor);
         const stores = await database.transaction(actor, (transaction) =>
           rows(transaction, sql`SELECT id FROM stores`),

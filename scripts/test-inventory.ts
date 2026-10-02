@@ -9,6 +9,12 @@ export const unitFiles = new Set([
   'tests/report-period.test.ts',
   'tests/api-response.test.ts',
   'tests/auth-web.test.ts',
+  'tests/finance-contracts.test.ts',
+  'tests/finance-tax.test.ts',
+  'tests/finance-ui.test.ts',
+  'tests/web-routing.test.ts',
+  'tests/web-intent.test.ts',
+  'tests/web-rewrite.test.ts',
 ]);
 
 export function testFiles(): string[] {

@@ -15,9 +15,25 @@ import { Recommendations } from './recommendations';
 import { enrich } from './openapi';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { json as jsonParser } from 'express';
+import { Finance } from './finance';
+import { FinanceFiles } from './finance-files';
+import { FinanceApi } from './finance-controller';
+import { FinanceExports } from './finance-exports';
 @Module({
-  controllers: [Api],
-  providers: [Database, Business, Auth, Ai, Artifacts, Administration, Imports, Recommendations],
+  controllers: [Api, FinanceApi],
+  providers: [
+    Database,
+    Business,
+    Auth,
+    Ai,
+    Artifacts,
+    Administration,
+    Imports,
+    Recommendations,
+    Finance,
+    FinanceFiles,
+    FinanceExports,
+  ],
 })
 class App {}
 export async function createApp(options: { writeOpenapi?: boolean } = {}) {
@@ -29,6 +45,7 @@ export async function createApp(options: { writeOpenapi?: boolean } = {}) {
   const app = await NestFactory.create(App, { bodyParser: false });
   app.use('/v1/sync/events', jsonParser({ limit: '4mb' }));
   app.use('/v1/products/import', jsonParser({ limit: '5mb' }));
+  app.use('/v1/purchase-invoices', jsonParser({ limit: '1mb' }));
   app.use(jsonParser({ limit: '256kb' }));
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' });
   app.useGlobalGuards(app.get(Auth));

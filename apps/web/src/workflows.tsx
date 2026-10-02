@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { PurchaseSupplierPicker, PurchaseSupplierLink, purchaseLinkKey } from './PurchaseSuppliers';
+import type { SupplierDto } from '@regi/core/finance';
+import type { WebActor } from './web-context';
 type Props = {
   api: (path: string, body?: any, method?: string) => Promise<any>;
   post: (path: string, body?: any) => Promise<any>;
@@ -11,6 +14,7 @@ type Props = {
   shifts?: any[];
   settings?: any;
   store: string;
+  actorRole?: WebActor['role'];
 };
 const yen = (value: any) => `${BigInt(String(value ?? 0)).toLocaleString('ja-JP')}円`;
 export function Stocktakes({ api, post, action, busy, products, store }: Props) {
@@ -22,6 +26,7 @@ export function Stocktakes({ api, post, action, busy, products, store }: Props) 
     [ack, setAck] = useState(false),
     [reason, setReason] = useState('');
   async function load() {
+    if (!store) return;
     const [sessions, events] = await Promise.all([
       api(`/v1/documents/stocktake?storeId=${store}`),
       api(`/v1/sync/reviews?storeId=${store}`),
@@ -32,6 +37,7 @@ export function Stocktakes({ api, post, action, busy, products, store }: Props) 
   React.useEffect(() => {
     setSelected('');
     setCounts({});
+    if (!store) return;
     action(load);
   }, [store]);
   return (
@@ -153,9 +159,12 @@ export function ReceiptCorrections({ api, post, action, busy, orders = [], store
     [reason, setReason] = useState(''),
     [error, setError] = useState('');
   async function load() {
+    if (!store) return;
     setReceipts(await api(`/v1/documents/receipt?storeId=${store}`));
+    setError('');
   }
   React.useEffect(() => {
+    if (!store) return;
     load().catch((caught) => setError(caught.message));
   }, [store, orders]);
   return (
@@ -196,7 +205,7 @@ export function ReceiptCorrections({ api, post, action, busy, orders = [], store
     </section>
   );
 }
-export function Purchases({ post, action, busy, products, orders = [] }: Props) {
+export function Purchases({ api, post, action, busy, products, orders = [], actorRole }: Props) {
   const [supplier, setSupplier] = useState(''),
     [productId, setProductId] = useState(''),
     [quantity, setQuantity] = useState('1'),
@@ -207,17 +216,34 @@ export function Purchases({ post, action, busy, products, orders = [] }: Props) 
     [revision, setRevision] = useState<Record<string, Record<number, string>>>({}),
     [reason, setReason] = useState(''),
     [search, setSearch] = useState('');
+  const [masterSupplier, setMasterSupplier] = useState<SupplierDto | null>(null);
+  const canManage =
+    actorRole !== undefined && ['admin', 'headquarters', 'manager'].includes(actorRole);
   const line = () => ({ productId, quantity: Number(quantity), unitCost: cost });
   return (
     <>
       <section>
         <h3>発注下書きを作成</h3>
+        {canManage && (
+          <PurchaseSupplierPicker
+            api={api}
+            busy={busy}
+            value={masterSupplier?.id ?? ''}
+            onSelect={(value) => {
+              setMasterSupplier(value);
+              if (value) setSupplier(value.name);
+            }}
+          />
+        )}
         <div className="row">
           <input
             aria-label="仕入先"
             placeholder="仕入先"
             value={supplier}
-            onChange={(event) => setSupplier(event.target.value)}
+            onChange={(event) => {
+              setSupplier(event.target.value);
+              setMasterSupplier(null);
+            }}
           />
           <input
             aria-label="商品検索"
@@ -269,6 +295,7 @@ export function Purchases({ post, action, busy, products, orders = [] }: Props) 
               action(async () => {
                 await post('/v1/purchase-orders', {
                   supplier,
+                  ...(masterSupplier ? { supplierId: masterSupplier.id } : {}),
                   expectedAt: date,
                   lines: cart.length ? cart : [line()],
                 });
@@ -305,6 +332,19 @@ export function Purchases({ post, action, busy, products, orders = [] }: Props) 
                 {order.body.supplier} / {order.status}
               </b>
               <small>{order.id}</small>
+              {canManage && (
+                <details>
+                  <summary>仕入先との対応</summary>
+                  <PurchaseSupplierLink
+                    key={purchaseLinkKey(order)}
+                    order={order as unknown}
+                    api={api}
+                    post={post}
+                    action={action}
+                    busy={busy}
+                  />
+                </details>
+              )}
               {order.body.lines.map((entry: any, index: number) => (
                 <div className="row" key={index}>
                   <span>

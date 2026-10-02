@@ -13,6 +13,10 @@ export default tseslint.config(
   },
   js.configs.recommended,
   {
+    files: ['infra/sandbox/web-route-rewrite.js'],
+    languageOptions: { sourceType: 'script' },
+  },
+  {
     files: ['**/*.ts', '**/*.tsx'],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {

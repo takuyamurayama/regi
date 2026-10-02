@@ -34,7 +34,7 @@ class RestartRunner : Instrumentation() {
                 try {
                     val repository = Repository(targetContext, database)
                     repository.network.configure(
-                        "http://10.0.2.2:3000",
+                        fixtureApiBaseUrl(arguments),
                         "",
                         true,
                         fixture.getString("cashierSubject"),

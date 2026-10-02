@@ -167,7 +167,17 @@ CREATE TABLE dollars$in$name(id integer);`,
 
 void test('empty database applies 000 through 007 with matching checksums and safe SCRAM app role', async () => {
   await temporaryDatabase(async (client, _database, admin) => {
-    await runMigrations({ client });
+    const approvedDirectory = resolve('apps/api/prisma/migrations');
+    const d0Files = Object.fromEntries(
+      readdirSync(approvedDirectory)
+        .filter((folder) => /^00[0-7]_/.test(folder))
+        .map((folder) => [
+          folder,
+          readFileSync(resolve(approvedDirectory, folder, 'migration.sql'), 'utf8'),
+        ]),
+    );
+    // Keep this D0 gate and its eight-version expectation frozen; later migrations have separate upgrade tests.
+    await runMigrations({ client, directory: migrationDirectory(d0Files) });
     const versions = await client.query<{ version: string; checksum: string }>(
       'SELECT version,checksum FROM regi_migrations ORDER BY version',
     );

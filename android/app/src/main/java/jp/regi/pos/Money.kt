@@ -14,6 +14,8 @@ data class SaleLine(
     val cost: String,
     val stockManaged: Boolean,
     val taxContext: String = "master",
+    val taxCode: String? = null,
+    val reducedTarget: Boolean? = null,
 )
 
 data class PaidLine(
@@ -32,7 +34,7 @@ object Money {
     const val ruleVersion = "regi-1"
 
     fun value(input: String): BigInteger {
-        require(input.matches(Regex("^(0|[1-9][0-9]{0,29})$")))
+        require(input.matches(Regex("^(0|[1-9][0-9]{0,29})$"))) { "金額は0以上の整数（最大30桁）で入力してください" }
         return BigInteger(input)
     }
 
@@ -58,18 +60,23 @@ object Money {
     }
 
     fun calculate(lines: List<SaleLine>, discount: String, mode: String): Total {
-        require(lines.isNotEmpty() && lines.size <= 500 && mode in listOf("inclusive", "exclusive"))
+        require(
+            lines.isNotEmpty() && lines.size <= 500 && mode in listOf("inclusive", "exclusive")
+        ) {
+            "商品明細・価格表示区分を確認してください"
+        }
         val net =
             lines.map { line ->
-                require(line.quantity in 1..10000 && line.rateBps in 0..10000)
+                require(line.quantity in 1..10000) { "数量は1〜10000の整数で入力してください" }
+                require(line.rateBps in 0..10000) { "税率を同期して確認してください" }
                 value(line.cost)
                 val gross = value(line.price) * line.quantity.toBigInteger()
                 val reduction = value(line.discount)
-                require(reduction <= gross)
+                require(reduction <= gross) { "商品値引きが明細金額を超えています" }
                 gross - reduction
             }
         val reduction = value(discount)
-        require(reduction <= net.fold(BigInteger.ZERO, BigInteger::add))
+        require(reduction <= net.fold(BigInteger.ZERO, BigInteger::add)) { "会計値引きが商品金額を超えています" }
         val allocated = allocate(reduction, net)
         val bases = net.indices.map { net[it] - allocated[it] }
         val paid = bases.toMutableList()

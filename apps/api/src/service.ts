@@ -2,10 +2,21 @@ import { Injectable } from '@nestjs/common';
 import { createHash, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { Actor, Database, rows, sql, Tx } from './db';
 import { BusinessError, requireRule } from './errors';
-import { businessDate, calculate, money, RULE_VERSION } from '../../../packages/core/src';
+import {
+  businessDate,
+  calculate,
+  money,
+  RULE_VERSION,
+  type CalculatedLine,
+} from '../../../packages/core/src';
 import { z } from 'zod';
 import { recoveryToken } from './auth';
 import { receiptProfile } from './receipt-profile';
+import {
+  OperationStatusDtoSchema,
+  OperationStatusQuerySchema,
+  PartySnapshotSchema,
+} from '../../../packages/core/src/finance';
 type SyncStatus = 'accepted' | 'review' | 'retry';
 export interface SyncResult {
   id: string | null;
@@ -110,6 +121,8 @@ const saleSchema = z.object({
           cost: amount,
           stockManaged: z.boolean(),
           taxContext: z.enum(['master', 'dine-in', 'takeaway']).optional(),
+          taxCode: z.string().min(1).max(50).optional(),
+          reducedTarget: z.boolean().optional(),
         }),
       )
       .min(1)
@@ -204,6 +217,34 @@ export class Business {
       return result;
     });
   }
+  async operationStatus(actor: Actor, id: string, input: unknown) {
+    const operationId = parse(uuid, id);
+    const { storeId } = OperationStatusQuerySchema.parse(input);
+    requireRule(!actor.deviceId, 'ROLE_FORBIDDEN', '管理者のログインが必要です', 403);
+    requireRule(
+      ['admin', 'headquarters'].includes(actor.role) || actor.stores.includes(storeId),
+      'NOT_FOUND',
+      '操作状態を確認できません',
+      404,
+    );
+    return this.database.transaction(actor, async (transaction) => {
+      await this.contract(transaction, false);
+      const [operation] = await rows<{ id: string }>(
+        transaction,
+        sql`SELECT operation.id FROM operations AS operation
+          WHERE operation.id=${operationId}::uuid
+            AND EXISTS (SELECT 1 FROM stores WHERE stores.id=${storeId}::uuid)
+            AND (operation.store_id=${storeId}::uuid OR operation.store_id IS NULL)
+            AND EXISTS (SELECT 1 FROM audit
+              WHERE audit.tenant_id=operation.tenant_id AND audit.entity_id=operation.id AND audit.actor_id=${actor.staffId}::uuid
+                AND audit.store_id IS NOT DISTINCT FROM operation.store_id
+                AND (audit.action NOT LIKE 'finance.%' OR ${actor.role} IN ('admin','headquarters','manager')))`,
+      );
+      requireRule(operation, 'NOT_FOUND', '操作状態を確認できません', 404);
+      // A missing row cannot prove non-commit. Only return the authenticated actor's commit fact.
+      return OperationStatusDtoSchema.parse({ operationId: operation.id, status: 'committed' });
+    });
+  }
   async change(
     transaction: Tx,
     actor: Actor,
@@ -271,6 +312,7 @@ export class Business {
     sourceId: string,
     line: string,
     reason: string,
+    forceRecordedMovement = false,
   ) {
     if (!quantity) return;
     if (reason !== 'stocktake') {
@@ -292,7 +334,7 @@ export class Business {
       sql`SELECT * FROM products WHERE id=${productId}::uuid`,
     );
     requireRule(product, 'PRODUCT_NOT_FOUND', '商品がありません', 404);
-    if (!product.stock_managed) return;
+    if (!product.stock_managed && !forceRecordedMovement) return;
     await transaction.$executeRaw(
       sql`INSERT INTO inventory VALUES(${randomUUID()}::uuid,${actor.tenantId}::uuid,${storeId}::uuid,${productId}::uuid,${quantity},${sourceId}::uuid,${line},${reason},now())`,
     );
@@ -383,6 +425,7 @@ export class Business {
   }
   async settings(actor: Actor) {
     return this.database.transaction(actor, async (transaction) => ({
+      actor: { staffId: actor.staffId, role: actor.role },
       tenant: await this.contract(transaction, false),
       stores: await rows(transaction, sql`SELECT * FROM stores`),
       devices: await rows(transaction, sql`SELECT * FROM devices`),
@@ -537,7 +580,7 @@ export class Business {
     return this.database.transaction(actor, async (transaction) => {
       const entries = await rows(
         transaction,
-        sql`SELECT cursor::text,kind,entity_id,store_id,body FROM changes WHERE cursor>${BigInt(cursor)} ORDER BY changes.cursor LIMIT 1000`,
+        sql`SELECT cursor::text,kind,entity_id,store_id,body FROM changes WHERE cursor>${BigInt(cursor)} AND (kind<>'purchase-finance' OR ${!actor.deviceId && ['admin', 'headquarters', 'manager'].includes(actor.role)}) ORDER BY changes.cursor LIMIT 1000`,
       );
       const [head] = await rows(transaction, sql`SELECT cursor::text FROM change_heads`);
       return {
@@ -1076,6 +1119,7 @@ export class Business {
       'CALCULATION_MISMATCH',
       '端末とサーバーの金額が一致しません',
     );
+    const classifications: { taxCode: string; reducedTarget: boolean }[] = [];
     for (const line of event.body.lines) {
       const paymentStartedAt = new Date(event.body.paymentStartedAt ?? event.occurredAt);
       requireRule(
@@ -1087,7 +1131,13 @@ export class Business {
         '開始時認証・支払開始日時を確認してください',
         400,
       );
-      const [product] = await rows(
+      const [product] = await rows<{
+        amount: string;
+        cost_snapshot: string;
+        stock_managed: boolean;
+        tax_code: string;
+        rate_bps: number;
+      }>(
         transaction,
         sql`SELECT p.*,pr.amount::text,pr.cost_snapshot::text,CASE WHEN ${line.taxContext ?? null}='dine-in' AND pr.tax_code='reduced' THEN 'standard' ELSE pr.tax_code END AS tax_code,tr.rate_bps FROM products p
     JOIN LATERAL(SELECT * FROM prices WHERE product_id=p.id AND effective_at<=${paymentStartedAt} ORDER BY effective_at DESC LIMIT 1) pr ON true
@@ -1109,6 +1159,17 @@ export class Business {
         'MASTER_MISMATCH',
         '販売時の価格・原価・税率を確認してください',
       );
+      const classification = {
+        taxCode: product.tax_code,
+        reducedTarget: product.tax_code === 'reduced',
+      };
+      requireRule(
+        (line.taxCode === undefined || line.taxCode === classification.taxCode) &&
+          (line.reducedTarget === undefined || line.reducedTarget === classification.reducedTarget),
+        'MASTER_MISMATCH',
+        '販売時の税区分・軽減対象を確認してください',
+      );
+      classifications.push(classification);
       const [confirmedRate] = await rows(
         transaction,
         sql`SELECT rate_bps FROM tax_rates WHERE code=${product.tax_code} AND effective_at<=${new Date(event.occurredAt)} ORDER BY effective_at DESC LIMIT 1`,
@@ -1158,6 +1219,7 @@ export class Business {
       'confirmed',
       {
         ...calculated,
+        lines: calculated.lines.map((line, index) => ({ ...line, ...classifications[index] })),
         receipt,
         buyerName: event.body.buyerName ?? '',
         method: event.body.method,
@@ -1420,10 +1482,19 @@ export class Business {
       '一覧種別が不正です',
       400,
     );
-    if (storeId) this.access(actor, storeId);
+    if (storeId !== undefined) this.access(actor, storeId);
     requireRule(query.length <= 200, 'SEARCH_LIMIT', '検索語は200文字以内です', 400);
     return this.database.transaction(actor, async (transaction) => {
       await this.contract(transaction, false);
+      if (
+        kind === 'purchase-order' &&
+        ['admin', 'headquarters', 'manager'].includes(actor.role) &&
+        !actor.deviceId
+      )
+        return rows(
+          transaction,
+          sql`SELECT d.*,(SELECT l.supplier_id FROM purchase_supplier_links l WHERE l.order_id=d.id ORDER BY l.recorded_at DESC,l.id DESC LIMIT 1) AS "currentSupplierId",(SELECT s.version FROM purchase_supplier_links l JOIN purchase_suppliers s ON s.id=l.supplier_id WHERE l.order_id=d.id ORDER BY l.recorded_at DESC,l.id DESC LIMIT 1) AS "currentSupplierVersion" FROM documents d WHERE d.kind=${kind} AND (${storeId ?? null}::uuid IS NULL OR d.store_id=${storeId ?? null}::uuid) AND (d.id::text ILIKE ${'%' + query + '%'} OR d.body::text ILIKE ${'%' + query + '%'}) ORDER BY d.created_at DESC LIMIT 1000`,
+        );
       return rows(
         transaction,
         sql`SELECT * FROM documents WHERE kind=${kind} AND (${storeId ?? null}::uuid IS NULL OR store_id=${storeId ?? null}::uuid OR (kind='transfer' AND body->>'toStoreId'=${storeId ?? ''})) AND (id::text ILIKE ${'%' + query + '%'} OR body::text ILIKE ${'%' + query + '%'}) ORDER BY created_at DESC LIMIT 1000`,
@@ -1495,7 +1566,7 @@ export class Business {
         '未完了の返金を先に確認してください',
       );
       const lines = data.lines.map((line) => {
-        const original = sale.body.lines[line.index];
+        const original = sale.body.lines[line.index] as CalculatedLine | undefined;
         requireRule(original, 'LINE_NOT_FOUND', '元明細がありません', 400);
         const returned = prior
           .flatMap((record) => record.body.lines)
@@ -1522,6 +1593,10 @@ export class Business {
           paid,
           taxManagement,
           unitOffset: returned,
+          ...(original.taxCode === undefined ? {} : { taxCode: original.taxCode }),
+          ...(original.reducedTarget === undefined
+            ? {}
+            : { reducedTarget: original.reducedTarget }),
         };
       });
       return this.createDocument(
@@ -1625,6 +1700,7 @@ export class Business {
         operationId: uuid,
         storeId: uuid,
         supplier: z.string().min(1).max(200),
+        supplierId: uuid.optional(),
         expectedAt: z.iso.date(),
         lines: z
           .array(z.object({ productId: uuid, quantity: integer, unitCost: amount }))
@@ -1634,6 +1710,22 @@ export class Business {
       input,
     );
     return this.mutation(actor, input, 'purchase.create', data.storeId, async (transaction) => {
+      let supplierName = data.supplier;
+      let supplierSnapshot: unknown;
+      let supplierVersion: number | null = null;
+      if (data.supplierId) {
+        this.access(actor, data.storeId, ['admin', 'headquarters', 'manager']);
+        const [supplier] = await rows<{ body: unknown; active: boolean; version: number }>(
+          transaction,
+          sql`SELECT body,active,version FROM purchase_suppliers WHERE id=${data.supplierId}::uuid`,
+        );
+        requireRule(supplier, 'SUPPLIER_NOT_FOUND', '仕入先がありません', 404);
+        requireRule(supplier.active, 'SUPPLIER_INACTIVE', '有効な仕入先を選択してください');
+        const snapshot = PartySnapshotSchema.strip().parse(supplier.body);
+        supplierName = snapshot.name;
+        supplierSnapshot = snapshot;
+        supplierVersion = supplier.version;
+      }
       const lines = [];
       for (const line of data.lines) {
         const [product] = await rows(
@@ -1643,14 +1735,25 @@ export class Business {
         requireRule(product, 'PRODUCT_NOT_FOUND', '商品がありません', 404);
         lines.push({ ...line, name: product.name, received: 0 });
       }
-      return this.createDocument(
+      const order = await this.createDocument(
         transaction,
         actor,
         'purchase-order',
         'draft',
-        { supplier: data.supplier, expectedAt: data.expectedAt, lines, revisions: [] },
+        { supplier: supplierName, expectedAt: data.expectedAt, lines, revisions: [] },
         data.storeId,
       );
+      if (data.supplierId) {
+        await transaction.$executeRaw(
+          sql`INSERT INTO purchase_supplier_links(id,tenant_id,store_id,order_id,supplier_id,body,actor_id) VALUES(${randomUUID()}::uuid,${actor.tenantId}::uuid,${data.storeId}::uuid,${order.id}::uuid,${data.supplierId}::uuid,${json({ supplierSnapshot, originalSupplierText: supplierName, reason: '新規発注時の仕入先選択' })}::jsonb,${actor.staffId}::uuid)`,
+        );
+        return {
+          ...order,
+          currentSupplierId: data.supplierId,
+          currentSupplierVersion: supplierVersion,
+        };
+      }
+      return order;
     });
   }
   async purchaseAction(
@@ -1827,6 +1930,15 @@ export class Business {
           sql`SELECT id FROM documents WHERE kind='receipt-cancel' AND body->>'receiptId'=${id}`,
         );
         requireRule(!prior, 'ALREADY_CANCELLED', '入荷は取消済みです');
+        const [finance] = await rows<{ id: string }>(
+          transaction,
+          sql`SELECT i.id FROM purchase_invoices i WHERE i.store_id=${input.storeId}::uuid AND i.state IN ('draft','posted') AND (EXISTS(SELECT 1 FROM purchase_invoice_allocations a WHERE a.invoice_id=i.id AND a.receipt_id=${id}::uuid) OR EXISTS(SELECT 1 FROM jsonb_array_elements(i.draft->'lines') l CROSS JOIN LATERAL jsonb_array_elements(l->'receiptAllocations') a WHERE a->>'receiptId'=${id})) UNION ALL SELECT r.id FROM purchase_returns r JOIN purchase_return_lines l ON l.return_id=r.id WHERE l.receipt_id=${id}::uuid AND r.reversal_of IS NULL AND NOT EXISTS(SELECT 1 FROM purchase_returns inverse WHERE inverse.reversal_of=r.id) LIMIT 1`,
+        );
+        requireRule(
+          !finance,
+          'FINANCE_RECEIPT_ALLOCATED',
+          '請求照合・物品返品済みの入荷は誤入荷取消できません',
+        );
         const order = await this.document(transaction, receipt.body.orderId, 'purchase-order');
         const cancellation = await this.createDocument(
           transaction,

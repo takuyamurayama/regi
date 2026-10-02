@@ -9,6 +9,8 @@ export type LineInput = {
   cost: string;
   stockManaged: boolean;
   taxContext?: 'master' | 'dine-in' | 'takeaway';
+  taxCode?: string;
+  reducedTarget?: boolean;
 };
 export type CalculatedLine = LineInput & {
   net: string;

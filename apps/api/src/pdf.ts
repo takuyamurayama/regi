@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { InvoiceDto } from '../../../packages/core/src/finance';
 
 type Source = { id: string; store_id: string; created_at?: Date | string; body: any };
 type Column = { label: string; width: number; align?: 'left' | 'right' };
@@ -107,7 +108,10 @@ function content(kind: string, source: Source) {
         { label: refund ? '税込返金額' : '税込金額', width: 140.28, align: 'right' },
       ];
   const lines: string[][] = body.lines.map((line: any, index: number) => {
-    const descriptions = [line.name ?? line.productId ?? '商品名の記録なし'];
+    const target = (line as { reducedTarget?: unknown }).reducedTarget === true;
+    const descriptions = [
+      (target && !purchase ? '※ ' : '') + (line.name ?? line.productId ?? '商品名の記録なし'),
+    ];
     if (!purchase && !refund) {
       if (line.taxContext === 'dine-in') descriptions.push('店内飲食');
       if (line.taxContext === 'takeaway') descriptions.push('持ち帰り');
@@ -187,6 +191,13 @@ function content(kind: string, source: Source) {
           '上記の金額を領収いたしました。',
           '税込金額は値引き後の確定額です。税額は保存済みの税率別内訳を表示しています。',
         ];
+  if (
+    !purchase &&
+    (body as { lines: { reducedTarget?: unknown }[] }).lines.some(
+      (line) => line.reducedTarget === true,
+    )
+  )
+    notes.push('※ は軽減税率対象の明細です。販売時に保存された税区分を表示しています。');
   return {
     title,
     subtitle,
@@ -487,6 +498,158 @@ export async function renderDocumentPdf(kind: string, source: Source): Promise<B
     layout.finish();
     document.end();
   } catch (error) {
+    document.destroy(error instanceof Error ? error : new Error(String(error)));
+  }
+  return completed;
+}
+
+export async function renderFinanceInvoicePdf(invoice: InvoiceDto): Promise<Buffer> {
+  const buyerStatement = invoice.sourceKind === 'buyer-statement';
+  const confirmed = invoice.supplierConfirmationStatus === 'confirmed-recorded';
+  const title = buyerStatement ? '仕入明細書' : '受領請求の管理用写し';
+  const font =
+    process.env.JAPANESE_FONT ?? '/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc';
+  if (!existsSync(font)) throw new Error('日本語PDFフォントがありません');
+  const bold = join(dirname(font), 'NotoSansCJK-Bold.ttc');
+  const document = new PDFDocument({
+    size: 'A4',
+    margin: 0,
+    autoFirstPage: false,
+    bufferPages: true,
+    info: { Title: title + ' ' + invoice.internalReference, Author: 'REGI', Creator: 'REGI' },
+  });
+  const chunks: Buffer[] = [];
+  const completed = new Promise<Buffer>((resolve, reject) => {
+    document.on('data', (chunk: Buffer) => chunks.push(chunk));
+    document.on('end', () => resolve(Buffer.concat(chunks)));
+    document.on('error', reject);
+  });
+  try {
+    document.registerFont('jp', font, 'NotoSansCJKjp-Regular');
+    document.registerFont(
+      'jp-bold',
+      existsSync(bold) ? bold : font,
+      existsSync(bold) ? 'NotoSansCJKjp-Bold' : 'NotoSansCJKjp-Regular',
+    );
+    const content = invoice.content;
+    const seller = content.seller;
+    const buyer = content.buyer;
+    const identity = content.sourceIdentity;
+    const original =
+      identity?.kind === 'numbered'
+        ? identity.invoiceNumber
+        : (identity?.sourceReference ?? '原識別の記録なし');
+    const party = [
+      seller?.name,
+      seller?.address,
+      seller?.registered ? seller.registrationNumber : '非登録事業者として記録',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const purchasing = [buyer?.name, buyer?.address].filter(Boolean).join('\n');
+    const layout = new Layout(document, title, invoice.internalReference);
+    layout.start(
+      buyerStatement
+        ? confirmed
+          ? '相手方確認記録あり'
+          : '相手方確認待ち'
+        : '原書類の記載を保存した管理用出力',
+    );
+    layout.parties(
+      (buyerStatement ? seller?.name : (buyer?.name ?? '宛名の記録なし')) + ' 御中',
+      buyerStatement ? purchasing : party,
+      [
+        { label: '原書類の識別', value: original },
+        { label: '原書類日', value: date(content.invoiceDate) },
+        { label: '支払期日', value: date(content.dueDate) },
+        {
+          label: '取引期間',
+          value: date(content.transactionFrom) + ' 〜 ' + date(content.transactionTo),
+        },
+        { label: '訂正版', value: String(invoice.revision) },
+        { label: '保存済み状態', value: invoice.state },
+      ],
+    );
+    if (buyerStatement) layout.detail({ label: '相手方名称・住所・登録番号', value: party });
+    layout.total(
+      '原書類・明細の税込総額',
+      BigInt(invoice.balance.originalGross ?? invoice.preview.acceptedGross ?? '0'),
+    );
+    layout.heading('仕入明細');
+    layout.table(
+      [
+        { label: 'No.', width: 28 },
+        { label: '取引日・品名', width: 219.28 },
+        { label: '数量', width: 50, align: 'right' },
+        { label: '税区分', width: 90 },
+        { label: '税込金額', width: 120, align: 'right' },
+      ],
+      invoice.preview.lines.map((l) => [
+        String(l.lineNo),
+        date(l.transactionDate) + '\n' + (l.reducedTarget ? '※ ' : '') + l.name,
+        String(l.quantity),
+        l.taxCategory === 'taxable'
+          ? rate(l.rateBps)
+          : l.taxCategory === 'non-taxable'
+            ? '非課税'
+            : '不課税',
+        yen(l.gross),
+      ]),
+    );
+    layout.heading('税区分ごとの原金額');
+    layout.table(
+      [
+        { label: '税区分', width: 127.28 },
+        { label: '税抜金額', width: 125, align: 'right' },
+        { label: '税額', width: 110, align: 'right' },
+        { label: '税込金額', width: 145, align: 'right' },
+      ],
+      invoice.preview.taxGroups.map((g) => {
+        const a = g.supplierStated ?? g.computed;
+        return [
+          g.taxCategory === 'taxable'
+            ? rate(g.rateBps)
+            : g.taxCategory === 'non-taxable'
+              ? '非課税'
+              : '不課税',
+          yen(a.net),
+          yen(a.tax),
+          yen(a.gross),
+        ];
+      }),
+    );
+    if (invoice.preview.lines.some((l) => l.reducedTarget))
+      layout.note('※ は保存された原明細の軽減税率対象です。税率のみから推定していません。');
+    if (buyerStatement) {
+      layout.heading('相手方確認');
+      layout.note(
+        confirmed
+          ? '確定済み明細に対する相手方確認の証跡を記録しています。'
+          : '相手方確認待ち。債務の確定と相手方による確認は別の状態です。',
+      );
+      for (const c of invoice.confirmations.filter(
+        (c) => c.postedSnapshotSha256 === invoice.postedSnapshotSha256,
+      )) {
+        layout.detail({
+          label: '確認者・確認日時',
+          value: c.counterpartyName + ' / ' + date(c.confirmedAt),
+        });
+        layout.detail({ label: '方法・証憑ID', value: c.method + ' / ' + c.evidenceId });
+      }
+    }
+    layout.heading('保存・確認情報');
+    layout.detail({ label: '原明細SHA-256', value: invoice.postedSnapshotSha256 ?? '下書き' });
+    layout.detail({
+      label: '原番号なしの根拠',
+      value: identity?.kind === 'unnumbered' ? identity.identificationReason : '番号付き原書類',
+    });
+    layout.note(content.note);
+    layout.note(
+      '受領原書類・税区分・確認証跡は別途保存されています。登録番号の確認は形式検査のみです。',
+    );
+    layout.finish();
+    document.end();
+  } catch (error: unknown) {
     document.destroy(error instanceof Error ? error : new Error(String(error)));
   }
   return completed;

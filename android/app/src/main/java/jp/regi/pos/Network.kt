@@ -22,6 +22,18 @@ class Network(private val context: Context, clock: () -> Long = { System.current
     val oauth = OAuth(context, clock)
     private val preferences = context.getSharedPreferences("regi", Context.MODE_PRIVATE)
 
+    fun configuredBaseUrl(): String? = preferences.getString("base", null)
+
+    fun configureConnection(baseUrl: String, token: String, development: Boolean) {
+        configure(
+            baseUrl,
+            token,
+            development,
+            preferences.getString("subject", "local-cashier") ?: "local-cashier",
+            preferences.getString("tenant", null),
+        )
+    }
+
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         return store.getKey("regi-token", null) as? SecretKey

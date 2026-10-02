@@ -1,6 +1,6 @@
 # REGI
 
-飲食店を主対象とする、日本円・日本語の Android POS / 本部管理 / 受発注 / 在庫 / 需要予測。店内・持ち帰りの税区分、税率別の領収書、適用開始日時付き税率履歴を重視します。将来の制度変更は確定した要件に従って設定し、予定税率を固定実装しません。
+飲食店を主対象とする、日本円・日本語の Android POS / 本部管理 / 受発注 / 仕入請求・買掛 / 在庫 / 需要予測。店内・持ち帰りの税区分、税率別の領収書、適用開始日時付き税率履歴を重視します。将来の制度変更は確定した要件に従って設定し、予定税率を固定実装しません。
 承認済み仕様は `docs/implementation-plan.md`、実装・検証の実態と未達条件は `docs/implementation-status.md` を参照してください。
 本リポジトリは実店舗での製品完成・一般販売・補助金登録を証明するものではありません。
 
@@ -36,7 +36,7 @@ npm run dev:api
 
 `db:migrate` は pg 8 の simple query で各 SQL ファイル全体を実行し、通常はファイル単位のトランザクションにします。先頭行が `-- regi:transaction=false` のファイルだけ文単位で実行でき、`CREATE INDEX CONCURRENTLY` に対応します。このモードでは途中失敗の前に完了した文が残るため、非トランザクションの SQL は再開手順も準備してください。
 
-000〜007 の SHA-256 を `regi_migrations.checksum` に記録し、適用済みファイルの改変・欠落は未適用 SQL の実行前に拒否します。旧版の version のみの台帳は、承認済み001〜006の SQL が変更されていないことを確認した上で、初回だけ checksum を追加して採用します。取引や適用済み SQL は再実行しません。変更は新しい migration へ追加し、エラーを避けるために checksum を上書きしないでください。アプリロールは台帳を参照できますが更新できません。
+000〜008 の SHA-256 を `regi_migrations.checksum` に記録し、適用済みファイルの改変・欠落は未適用 SQL の実行前に拒否します。D0の000〜007は変更せず、008で仕入金融の13表を追加しています。旧版の version のみの台帳は、承認済み001〜006の SQL が変更されていないことを確認した上で、初回だけ checksum を追加して採用します。取引や適用済み SQL は再実行しません。変更は新しい migration へ追加し、エラーを避けるために checksum を上書きしないでください。アプリロールは台帳を参照できますが更新できません。
 
 `000_roles` は `regi_app` の LOGIN と非特権設定を検査し、未作成なら SCRAM verifier で作成します。未作成ロールを作る初回だけ CREATE ROLE が可能な管理接続と `DATABASE_URL` のアプリパスワードが必要です。通常の migration には既存 `regi_owner` を使い、API には `regi_app` だけを渡します。ローカルでは `scripts/local-db.sh`、Docker では初期化 SQL、sandbox では既存の秘密ファイルによる role bootstrap が先にロールを用意します。この VM では AWS apply・配備を行いません。
 
@@ -55,10 +55,14 @@ Docker では `docker compose up --build db migrate api worker`。シードは `
 7. 現金返金は返金を支出する営業中開局に記録します。元取引の開局へ遡って現金を減らしません。
 8. 端末締めは暫定。店舗日締めは全端末の同期・未完了解消後に確定。棚卸では全端末を停止したまま差分を記録します。
 
+本部の「仕入請求」で原書類・税率別明細を保存し、入荷との照合、債務確定、相手方確認、部分支払、減額、返金、訂正、固定時点の出力へ進めます。物品返品と請求の減額は別々の事実として記録します。管理者・本部が金融操作、店長が担当店舗の閲覧・下書き・物品返品を行い、レジ担当へ原資料を公開しません。詳細は [仕入請求・買掛管理](docs/architecture/purchase-finance.md) を参照してください。
+
+画面は `/dashboard`、`/products`、`/purchases/orders`、`/purchases/suppliers`、`/purchases/invoices`、`/purchases/invoices/<UUID>`、`/purchases/payables`、`/purchases/returns`、`/inventory`、`/sales`、`/shifts`、`/ai`、`/sync`、`/settings` に直接アクセスできます。店舗・期間はqueryへ保存します。応答が不明な操作は同じ操作IDで再確認し、再読込後は「保存結果を照会」で保存済みか確認できます。結果不明のまま別IDを自動発行しません。
+
 CSV 商品取込見出し: `sku,jan,name,price,cost,taxCode,stockManaged`。`stockManaged` は `true/false`、金額は整数円。1回最大5,000行、法人合計50,000SKU。取込は一括トランザクションです。
 Web の「商品・価格」で登録商品を選ぶと版番号付き更新ができます。適用開始日時を指定すると価格を予約します。
 
-本部Webは白基調のモダンな管理画面です。読みやすい通常フォント、細い単線枠、丸みのあるカード、控えめなブルーを採用し、ダッシュボードの「ショートカット」から商品・発注・在庫・取引の実画面へ進めます。ドット文字・二重枠・ゲーム風カーソルを外し、フォントのダウンロードも不要です。店舗のイラストとSVGアイコンはオリジナル。発光・キラキラ・AI風グラデーションは使用せず、金額は円、支払比率は実集計、業務名・権限・予測の根拠や利用枠は明示的な表示を維持します。9画面はスマホ・タブレットにも対応し、横長の表は表の中でスクロールできます。キーボードのフォーカス、メインへのスキップリンク、動きを減らす端末設定に対応。読み込み中は売上ゼロではなく「—」を表示します。
+本部Webは白基調のモダンな管理画面です。読みやすい通常フォント、細い単線枠、丸みのあるカード、控えめなブルーを採用し、ダッシュボードの「ショートカット」から商品・発注・在庫・取引の実画面へ進めます。ドット文字・二重枠・ゲーム風カーソルを外し、フォントのダウンロードも不要です。店舗のイラストとSVGアイコンはオリジナル。発光・キラキラ・AI風グラデーションは使用せず、金額は円、支払比率は実集計、業務名・権限・予測の根拠や利用枠は明示的な表示を維持します。本部画面はスマホ・タブレットにも対応し、横長の表は表の中でスクロールできます。キーボードのフォーカス、メインへのスキップリンク、動きを減らす端末設定に対応。読み込み中は売上ゼロではなく「—」を表示します。
 
 ## 検証
 
@@ -82,9 +86,9 @@ NODE_ENV=test npx tsx scripts/restore-test.ts
 NODE_ENV=test REGI_LOAD_BASEURL=http://localhost:3000 npx tsx scripts/load-test.ts
 ```
 
-`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web の6ファイル（現時点18件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点95件、PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
+`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web と仕入金融・画面状態・URLの12ファイル（現時点47件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点132件、実PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
 
-`tests/manifest.txt` は既存 Node 71件・ブラウザー20件を保持し、D0追加を含む現在の Node 113件・ブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
+`tests/manifest.txt` は既存 Node 71件・ブラウザー20件とD0追加を保持し、現在の Node 179件・ブラウザー48件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全48件の実行確認である `test:web:manifest` は使用しません。
 
 Web 操作試験は migration・seed 済みの DB と Google Chrome (`/usr/bin/google-chrome`) を前提とします。Playwright の `webServer` が API と Web を起動して終了時に停止します。ローカルでは既存のサーバーを再利用できるため、変更後は現行 build で再起動してください。CI では再利用せず、毎回起動します。
 
@@ -92,7 +96,7 @@ ESLint 9 の `recommended-type-checked` を全 TypeScript に適用し、API の
 PDF の出力・検証には Noto Sans CJK の日本語フォントと Poppler (`pdftotext`) が必要です。Amazon Linux は `sudo dnf install -y google-noto-sans-cjk-ttc-fonts poppler-utils`。フォントの配置が異なる環境では `JAPANESE_FONT` に `NotoSansCJK-Regular.ttc` のパスを指定します。Docker イメージには日本語フォントを同梱しています。
 削除試験を含む `npm test` には、ローカル限定の `MAINTENANCE_TEST_DATABASE_URL` を `.env` の `MIGRATION_DATABASE_URL` と同じ所有者接続に設定してください。通常 API には所有者接続を渡しません。
 共有する実PostgreSQLスキーマへの保守DDLと業務試験が競合しないよう、試験ファイルは順次実行します。各試験内の同時再送・同時入荷・返金の競合検証は並列のままです。
-hostのbackup/restore試験も独立した一時DBで000〜007と追加テーブルを復元します。PG17のpg_dump/pg_restoreを使用してください。CIではPython試験stepの `POSTGRES_TEST_CONTAINER` でserviceと同じPG17クライアントを選びます。実AWSは呼ばずuploadはstubです。
+hostのbackup/restore試験も独立した一時DBで000〜007と追加テーブルを復元します。別試験で000〜008・仕入金融13表・原スナップショット・逆記録を実dumpから照合します。PG17のpg_dump/pg_restoreを使用してください。CIではPython試験stepの `POSTGRES_TEST_CONTAINER` でserviceと同じPG17クライアントを選びます。実AWSは呼ばずuploadはstubです。
 復元・負荷試験はローカル専用の試験データを追加します。復元試験は `.context/restore-test.dump` と別の `regi_restore_*` DB を残します。
 負荷試験では100端末のストレスを再現するため SQL で専用端末を作成し、通常の2台/店舗の登録制限を試験 fixture に限って迂回します。
 本番 DB に試験コマンドを実行してはいけません。

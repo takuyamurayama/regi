@@ -56,22 +56,28 @@ systemctl list-timers regi-backup.timer
 
 installerはruntimeで指定したファイル集合をSHA確認してから更新します。取得失敗・不一致はそのまま続行せず調査します。`systemctl restart regi` はowner migrationと新イメージ検証を実行するため、固定のbootstrap段階ログでreadyまで確認します。Docker imageのarchive SHA不一致では起動しません。`000〜007` のSQLを配備時に編集しません。
 
+仕入金融を含む追加releaseは `008_purchase_finance` を適用します。適用前の成功backupを確認し、既存000〜007のchecksumが変わっていないこと、適用後の008が `f672d5a8cc0ee32b3a446814f9a19cda5007477955bf6e2f493e3d891f003d72` と一致することを記録します。全13金融表のFORCE RLSと、既存の売上・在庫・端末連番を保持します。rollbackのために008を削除したり原請求・台帳を改変したりしません。
+
+本部Webも [sandboxのWeb公開手順](../aws-sandbox.md) で更新します。正規URLのCloudFront functionはAPI/health/assetsを変更せず、Webの直接アクセス・再読込を処理します。APIイメージだけの更新で新画面が配布済みとは扱いません。
+
 ## 配備後の受入
 
-| 項目                                                     | 実測・記録欄 |
-| -------------------------------------------------------- | ------------ |
-| 実施者、Mac profile、STS対象account一致                  | 未実施       |
-| commit、CI URL、archive SHA、release key                 | 未実施       |
-| planの意図外置換・削除なし、既存instance/data volume保持 | 未実施       |
-| runtime・host file SHA・bootstrap ready・稼働image       | 未実施       |
-| HTTPS health200、未認証API401、Web本人ログイン           | 未実施       |
-| 000〜007 checksum、appのNOSUPERUSER/NOBYPASSRLS          | 未実施       |
-| 起動直後・毎時・停止直前の成功dump/manifest pair         | 未実施       |
-| 東京・大阪のversion ID、SHA、複製到着時刻                | 未実施       |
-| Budget10 USD・ACTUAL80%/FORECASTED100%の宛先と通知       | 未実施       |
-| Web client1日・Android client30日refresh/callback設定    | 未実施       |
-| Android管理者再ログイン、原会計/outbox保持               | 未実施       |
-| 時計試験と別の実sandbox累計1週間・実Cognito長期同期      | 未実施       |
+| 項目                                                                    | 実測・記録欄 |
+| ----------------------------------------------------------------------- | ------------ |
+| 実施者、Mac profile、STS対象account一致                                 | 未実施       |
+| commit、CI URL、archive SHA、release key                                | 未実施       |
+| planの意図外置換・削除なし、既存instance/data volume保持                | 未実施       |
+| runtime・host file SHA・bootstrap ready・稼働image                      | 未実施       |
+| HTTPS health200、未認証API401、Web本人ログイン                          | 未実施       |
+| 000〜007 checksum、appのNOSUPERUSER/NOBYPASSRLS                         | 未実施       |
+| 008 checksum、金融13表のFORCE RLS、既存売上/在庫/連番保持               | 未実施       |
+| 仕入請求deep linkの再読込、同操作者の保存結果照会、レジ担当の原資料拒否 | 未実施       |
+| 起動直後・毎時・停止直前の成功dump/manifest pair                        | 未実施       |
+| 東京・大阪のversion ID、SHA、複製到着時刻                               | 未実施       |
+| Budget10 USD・ACTUAL80%/FORECASTED100%の宛先と通知                      | 未実施       |
+| Web client1日・Android client30日refresh/callback設定                   | 未実施       |
+| Android管理者再ログイン、原会計/outbox保持                              | 未実施       |
+| 時計試験と別の実sandbox累計1週間・実Cognito長期同期                     | 未実施       |
 
 Androidの設定にはdeploymentの `android_client_id` とCognito domainを入力します。Web clientの既存refresh tokenを流用しません。client切替時は会計を保持し、管理者がPKCEで再ログインします。未送信・要確認・確認待ちの件数を照合してから営業します。
 
