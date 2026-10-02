@@ -129,7 +129,7 @@ jobs:
         root: [infra, infra/sandbox]
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.13.3
       - run: terraform -chdir=${{ matrix.root }} fmt -check
