@@ -8,6 +8,10 @@ tests/artifacts.test.ts	税抜・全額値引き・将来税率でも税額は�
 tests/artifacts.test.ts	返還伝票は元販売日・返還日・元の適用税率と部分返金額だけを出力する
 tests/artifacts.test.ts	長い宛名・住所・改行を含む巨大明細を省略せずページ内へ折り返す
 tests/artifacts.test.ts	飲食店領収書のPDFに保存済み税率・値引き・支払・JST日時を整えて出力する
+tests/auth-audience.test.ts	Android audience retains signature issuer expiry token-use tenant subject and administrator MFA boundaries
+tests/auth-audience.test.ts	Android client configuration does not replace the required Web Cognito client
+tests/auth-audience.test.ts	Cognito accepts signed Web and Android ID tokens with the same tenant staff and MFA checks
+tests/auth-audience.test.ts	Web authentication remains available before the Android client ID is configured
 tests/auth-web.test.ts	browser PKCE rejects mismatched and expired state, refreshes once and clears logout
 tests/browser/ai.spec.ts	AI shows JST quota, returns failed connection quota and keeps sales usable
 tests/browser/auth.spec.ts	ブラウザー標準fetchでPKCEのコード交換と並列トークン更新が成功する
@@ -98,6 +102,13 @@ tests/sandbox.test.ts	parallel reruns preserve every fact, cursor and count with
 tests/sandbox.test.ts	sandbox opt-in, subject, tenant confirmation and private PIN file are mandatory
 tests/sandbox.test.ts	seed retains RLS and immutable sales/inventory and does not expose another store
 tests/sandbox.test.ts	synthetic seed resumes after interruption and creates complete authentic business facts
+tests/sync-dismiss.test.ts	HTTP signed admin can dismiss once with required reason while other roles and tenants cannot
+tests/sync-dismiss.test.ts	Prisma single_open_shift SQLSTATE23505 maps to review without converting unrelated unique failures
+tests/sync-dismiss.test.ts	Web opening conflict becomes durable review and dismissal aliases subsequent sale cash and close to the existing opening
+tests/sync-dismiss.test.ts	dismissed quarantine resolves both same-ID changed-body and same-sequence collisions without changing accepted original
+tests/sync-dismiss.test.ts	real Web duplicate opening converts the single_open_shift constraint to SHIFT_OPEN_CONFLICT and preserves the existing opening
+tests/sync-dismiss.test.ts	retry emits accepted device-event and cashier review reconciliation is complete and device scoped
+tests/sync-dismiss.test.ts	review counts are independent of pending and unresolved checkout aggregates still block stocktake
 tests/sync-failure.test.ts	real PostgreSQL accepted insert failure rolls back every monetary effect before durable waiting and one replay
 tests/sync-failure.test.ts	real PostgreSQL advisory lock held longer than thirty seconds induces P2028 without reviewing or losing sales
 tests/sync-failure.test.ts	real PostgreSQL batch cutoff keeps existing quarantined reviews retryable and unchanged

@@ -75,13 +75,17 @@ export class Auth implements CanActivate {
         'Cognitoが未設定です',
         503,
       );
+      const audiences = [
+        process.env.COGNITO_CLIENT_ID,
+        process.env.COGNITO_ANDROID_CLIENT_ID,
+      ].filter((clientId): clientId is string => Boolean(clientId));
       this.jwks ??= createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
       const token = request.headers.authorization?.replace(/^Bearer /, '');
       requireRule(token, 'UNAUTHENTICATED', 'ログインが必要です', 401);
       try {
         const { payload } = await jwtVerify(token, this.jwks, {
           issuer,
-          audience: process.env.COGNITO_CLIENT_ID,
+          audience: audiences,
           algorithms: ['RS256'],
         });
         requireRule(payload.token_use === 'id', 'TOKEN_USE', 'IDトークンが必要です', 401);

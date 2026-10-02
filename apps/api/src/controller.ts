@@ -6,6 +6,7 @@ import { Artifacts } from './artifacts';
 import { Administration } from './admin';
 import { Imports } from './import';
 import { Recommendations } from './recommendations';
+import type { Actor } from './db';
 @ApiTags('REGI')
 @ApiBearerAuth()
 @Controller()
@@ -78,8 +79,19 @@ export class Api {
   @Post('v1/sync/events') events(@Req() request: any, @Body() body: any) {
     return this.business.events(request.actor, body);
   }
-  @Get('v1/sync/reviews') reviews(@Req() request: any, @Query('storeId') storeId: string) {
-    return this.business.reviews(request.actor, storeId);
+  @Get('v1/sync/reviews') reviews(
+    @Req() request: { actor: Actor },
+    @Query('storeId') storeId: string,
+    @Query('deviceId') deviceId?: string,
+  ) {
+    return this.business.reviews(request.actor, storeId, deviceId);
+  }
+  @Post('v1/sync/reviews/:id/dismiss') dismissReview(
+    @Req() request: { actor: Actor },
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    return this.business.dismissReview(request.actor, id, body);
   }
   @Post('v1/sync/reviews/:id/retry') retryReview(
     @Req() request: any,

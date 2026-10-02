@@ -133,6 +133,33 @@ npm run db:seed:sandbox
 
 各店舗に**実Python/LightGBM処理**を実行し、完了日だけのデータから7日×7在庫商品×2店舗＝98予測行を保存します。時系列検証で曜日平均を上回らなければ基準在庫方式と表示します。未接続Bedrockの文章を捏造しません。生成AIは既定で無効。利用条件・モデルアクセス・EULAなどを本人が別途確認するまでは、有効化/申請しません。
 
+## Android 専用 Cognito client（D0 C82）
+
+`infra/sandbox/` は既存の Web client（refresh 1日）を保持し、同じ user pool に Android client を追加します。Android は client secret なし、Authorization Code + PKCE、`openid` / `profile`、callback `regipos://oauth`、ID/access token 1時間、refresh token 30日です。法人属性を更新する権限は付与しません。カスタム URI callback は [Cognito の app client 仕様](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_CreateUserPoolClient.html)に対応します。
+
+deployment の `client_id` は Web、`android_client_id` は Android です。SSM runtime の `clientId` / `androidClientId` を host がそれぞれ `COGNITO_CLIENT_ID` / `COGNITO_ANDROID_CLIENT_ID` として API/worker の私有環境ファイルへ渡します。API は Web client を必須とし、Android の設定が未追加・空の旧 runtime では Web audience のみを許可します。設定を追加しても JWT の署名・issuer・期限・ID token 種別・法人・担当者・MFA の検査を維持します。
+
+この変更は VM で fmt/validate/provider mock と署名付き JWT/実 PG 試験まで検証します。以下の更新は AWS 資格情報のある **Mac の運営者**が実施し、結果を記録してください。
+
+1. 更新イメージをビルドし、前述の手順で非公開 release key と `image_sha256` を私有 tfvars に設定します。既存 EC2 を起動して plan し、Android client の追加・runtime/release/host ファイル更新だけを確認します。既存 user pool/Web client/EC2/永続ディスクの置換・削除を提案する plan は適用しません。
+2. 確認した plan を apply し、`terraform output -json deployment` を私有 `deployment.json` へ更新します。Terraform の更新だけでは既存 EC2 の `/opt/regi/bootstrap.py` が更新されません。
+3. Mac の SSM Run Command で対象 instance 上の更新済み bootstrap を取得し、サービスを再起動します。bootstrap bucket と sandbox 名は確認済み deployment と tfvars に合わせます。`SendCommand` の instance/profile/account を確認し、以下を SSM の root コマンドとして渡します。
+
+   ```bash
+   set -euo pipefail
+   aws s3 cp s3://<bootstrap_bucket>/releases/<sandbox名>/bootstrap/bootstrap.py /opt/regi/bootstrap.py --region ap-northeast-1 --only-show-errors
+   chmod 600 /opt/regi/bootstrap.py
+   systemctl restart regi
+   systemctl is-active regi
+   ```
+
+4. `bootstrap-stage.json` の `ready`、HTTPS `/health`、既存 Web ログインを確認します。Android の設定へ deployment の `cognito_domain` と **`android_client_id`** を入力し、管理者が PKCE で再ログインします。旧 Web client の refresh token を Android client へ流用しません。設定切替でも Room の会計・未送信記録は保持します。
+5. Android audience の API 同期・lease 更新と、別 audience/不正署名の拒否を確認します。確認結果には日時・client 種別・成功/失敗・pending/review 件数を残し、JWT/refresh token/PIN を含めません。
+
+refresh token は **初回ログインから30日で失効**し、更新や rotation でも初回の期限は延長されません。[AWS の refresh token 仕様](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-refresh-token.html)に従い、30日の有効期間内の無人更新と、期限切れ `invalid_grant` で tokens を破棄し「管理者の再ログインが必要」を常時表示することを別々に検証します。D0-4 の「30日以上」を30日経過後も継続できる保証として完了扱いにはしません。
+
+ローカルの時計を進める試験の成功は実 Cognito の30日受入試験を代替しません。Mac から配備後、sandbox の2時間自動停止を維持した起動時間内で1週間の実時間同期を開始し、ログイン時刻・各日の同期/lease 更新・pending/review・再ログイン要求の有無を記録します。実 AWS の結果と30日境界の扱いは D0 判定時の未完外部条件として記録してください。初回ログインからの期間、運用停止時間、通信断による同期遅延を区別します。
+
 ## Web配布と初回表示
 
 deployment.jsonの `cognito_domain` / `client_id` で別途Webをビルドします。これらは公開クライアント設定で、AWSキーではありません。デモ用の履歴末日も指定すると、Cognito callbackがrootへ戻っても最後の7日が初期表示になります。日付は過去のまま表示し、今日の売上を偽装しません。通常製品は `VITE_DEMO_HISTORY_END` を設定せず、今日を初期表示します。

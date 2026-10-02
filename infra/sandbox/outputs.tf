@@ -7,6 +7,7 @@ output "deployment" {
     distribution_id     = aws_cloudfront_distribution.web.id
     user_pool_id        = aws_cognito_user_pool.staff.id
     client_id           = aws_cognito_user_pool_client.web.id
+    android_client_id   = aws_cognito_user_pool_client.android.id
     cognito_domain      = "https://${aws_cognito_user_pool_domain.staff.domain}.auth.ap-northeast-1.amazoncognito.com"
     web_bucket          = aws_s3_bucket.web.id
     private_bucket      = aws_s3_bucket.private.id

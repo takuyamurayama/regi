@@ -18,8 +18,8 @@ import org.json.JSONObject
 
 class NetworkFailure(val status: Int, message: String) : IllegalStateException(message)
 
-class Network(private val context: Context) {
-    val oauth = OAuth(context)
+class Network(private val context: Context, clock: () -> Long = { System.currentTimeMillis() }) {
+    val oauth = OAuth(context, clock)
     private val preferences = context.getSharedPreferences("regi", Context.MODE_PRIVATE)
 
     private fun key(): SecretKey {
@@ -128,14 +128,20 @@ class Network(private val context: Context) {
                 }
                 if (body != null) {
                     connection.doOutput = true
-                    connection.outputStream.use { it.write(body.toString().toByteArray()) }
+                    connection.outputStream.use {
+                        it.write(body.toString().toByteArray(Charsets.UTF_8))
+                    }
                 }
                 val stream =
                     if (connection.responseCode in 200..299) connection.inputStream
                     else connection.errorStream
-                val text = stream.bufferedReader().use { it.readText() }
+                val text = stream?.bufferedReader()?.use { it.readText() } ?: ""
                 if (connection.responseCode !in 200..299) {
-                    val error = JSONObject(text)
+                    val error =
+                        runCatching { JSONObject(text) }
+                            .getOrElse {
+                                JSONObject().put("message", "通信に失敗しました。元記録を保持して再試行してください")
+                            }
                     throw NetworkFailure(
                         connection.responseCode,
                         "${error.optString("code")}: ${error.optString("message")} ${error.optString("nextAction")}",

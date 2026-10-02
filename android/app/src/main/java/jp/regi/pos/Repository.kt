@@ -7,6 +7,8 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.bouncycastle.crypto.generators.SCrypt
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,8 +19,12 @@ class Repository(
     private val clock: () -> Instant = { Instant.now() },
 ) {
     val dao = database.dao()
-    val network = Network(context)
+    val network = Network(context) { clock().toEpochMilli() }
     private val work = WorkManager.getInstance(context)
+
+    companion object {
+        private val syncLock = Mutex()
+    }
 
     private suspend fun effectiveNow(): Instant {
         val offset = (dao.metadata("serverClockOffset") ?: "0").toLong()
@@ -462,36 +468,98 @@ class Repository(
     }
 
     suspend fun sync() {
-        val pending = dao.pending()
-        if (pending.isNotEmpty()) {
-            for (group in pending.groupBy { JSONObject(it.payload).getString("leaseId") }.values) {
-                val lease =
-                    JSONObject(
-                        dao.metadata(
-                            "lease-${JSONObject(group.first().payload).getString("leaseId")}"
-                        ) ?: snapshot().toString()
+        syncLock.withLock {
+            try {
+                synchronize()
+            } finally {
+                dao.metadata(
+                    Metadata(
+                        "administratorLoginRequired",
+                        network.oauth.requiresAdministratorLogin().toString(),
                     )
-                val result =
-                    network
-                        .request(
-                            "/v1/sync/events",
-                            JSONObject()
-                                .put("events", JSONArray(group.map { JSONObject(it.payload) })),
-                            lease.getString("recoveryToken"),
-                        )
-                        .getJSONArray("results")
-                database.withTransaction {
-                    for (index in 0 until result.length()) {
-                        val entry = result.getJSONObject(index)
-                        if (entry.getString("status") != "retry")
-                            dao.result(
-                                entry.getString("id"),
-                                if (entry.getString("status") == "accepted") "accepted"
-                                else "review",
-                                entry.optString("message"),
-                            )
-                    }
+                )
+            }
+        }
+    }
+
+    private suspend fun openingAlias(id: String, response: JSONObject) {
+        if (!response.has("shiftId") || !response.has("opening") || dao.metadata("shiftId") != id)
+            return
+        val event = dao.eventById(id) ?: return
+        if (JSONObject(event.payload).optString("type") != "shift.open") return
+        val target = response.getString("shiftId")
+        UUID.fromString(target)
+        Money.value(response.getString("opening"))
+        dao.metadata(Metadata("shiftId", target))
+        dao.metadata(Metadata("opening", response.getString("opening")))
+    }
+
+    private suspend fun synchronize() {
+        var maxCount = 100
+        var blocked: Exception? = null
+        while (true) {
+            val pending = dao.pending()
+            if (pending.isEmpty()) break
+            val batch =
+                try {
+                    SyncProtocol.nextBatch(pending, maxCount)
+                } catch (failure: Exception) {
+                    dao.result(pending.first().id, "pending", failure.message)
+                    blocked = failure
+                    break
                 }
+            val response =
+                try {
+                    require(batch.deviceId == snapshot().getJSONObject("device").getString("id")) {
+                        "未送信イベントの端末が一致しません"
+                    }
+                    val lease =
+                        dao.metadata("lease-${batch.leaseId}")?.let(::JSONObject)
+                            ?: snapshot().takeIf { it.getString("leaseId") == batch.leaseId }
+                            ?: error("イベント作成時の端末資格情報がありません。元記録を保持して管理者へ確認してください")
+                    network.request("/v1/sync/events", batch.body, lease.getString("recoveryToken"))
+                } catch (failure: NetworkFailure) {
+                    if (failure.status == 413 && batch.events.size > 1) {
+                        maxCount = SyncProtocol.smallerBatch(batch.events.size)
+                        continue
+                    }
+                    val reason =
+                        if (failure.status == 413) SyncPayloadTooLargeFailure() else failure
+                    batch.events.forEach { dao.result(it.id, "pending", reason.message) }
+                    blocked = reason
+                    break
+                } catch (failure: Exception) {
+                    batch.events.forEach { dao.result(it.id, "pending", failure.message) }
+                    blocked = failure
+                    break
+                }
+            val raw = response.getJSONArray("results")
+            val dispositions =
+                try {
+                    SyncProtocol.results(batch.events.map { it.id }.toSet(), raw)
+                } catch (failure: Exception) {
+                    batch.events.forEach { dao.result(it.id, "pending", failure.message) }
+                    blocked = failure
+                    break
+                }
+            database.withTransaction {
+                dispositions.forEach { entry ->
+                    dao.result(
+                        entry.id,
+                        if (entry.status == "retry") "pending" else entry.status,
+                        entry.message,
+                    )
+                    val original =
+                        (0 until raw.length())
+                            .map { raw.getJSONObject(it) }
+                            .first { it.getString("id") == entry.id }
+                    openingAlias(entry.id, original)
+                }
+                dao.metadata(Metadata("reviewCount", dao.reviewCount().toString()))
+            }
+            if (dispositions.none { it.status != "retry" }) {
+                blocked = IllegalStateException("未送信イベントが残っています。同じイベントを再送してください")
+                break
             }
         }
         renewAuthentication()
@@ -528,6 +596,19 @@ class Repository(
                 }
                 if (entry.getString("kind") == "sale")
                     dao.result(entry.getString("entity_id"), "accepted", null)
+                if (entry.getString("kind") == "device-event") {
+                    val disposition = SyncProtocol.change(entry)
+                    if (dao.eventById(disposition.id) != null) {
+                        dao.result(disposition.id, disposition.status, disposition.message)
+                        dao.metadata(
+                            Metadata(
+                                "deviceEvent-${disposition.id}",
+                                entry.getJSONObject("body").toString(),
+                            )
+                        )
+                        openingAlias(disposition.id, entry.getJSONObject("body"))
+                    }
+                }
             }
             dao.metadata(Metadata("cursor", changes.getString("cursor")))
         }
@@ -547,14 +628,30 @@ class Repository(
                 .forEach { dao.removeMetadata(it.key) }
         }
         val device = snapshot().getJSONObject("device")
+        val serverReviews =
+            network
+                .request(
+                    "/v1/sync/reviews?storeId=${device.getString("store_id")}&deviceId=${device.getString("id")}"
+                )
+                .getJSONArray("items")
+        val reviewIds = SyncProtocol.reviewIds(serverReviews, device.getString("id"))
+        database.withTransaction {
+            dao.reviews()
+                .filter { it.id !in reviewIds }
+                .forEach { dao.result(it.id, "pending", "サーバーの要確認一覧にありません。同じ元記録を再送してください") }
+            dao.metadata(Metadata("reviewCount", dao.reviewCount().toString()))
+        }
         network.request(
             "/v1/devices/${device.getString("id")}/status",
             JSONObject()
                 .put("operationId", UUID.randomUUID())
                 .put("storeId", device.getString("store_id"))
                 .put("pending", dao.pendingCount() + dao.unknownCount())
+                .put("reviewCount", dao.reviewCount())
                 .put("stopped", dao.metadata("stopped") == "true"),
         )
+        if (dao.pendingCount() > 0)
+            throw blocked ?: IllegalStateException("未送信イベントが残っています。同じイベントを再送してください")
     }
 
     suspend fun renewAuthentication() {
@@ -635,6 +732,10 @@ class SyncWorker(context: Context, parameters: WorkerParameters) :
         try {
             Repository(applicationContext).sync()
             Result.success()
+        } catch (_: SyncPayloadTooLargeFailure) {
+            Result.failure()
+        } catch (_: AdministratorLoginRequired) {
+            Result.failure()
         } catch (_: Exception) {
             Result.retry()
         }

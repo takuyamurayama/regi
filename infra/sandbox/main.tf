@@ -284,11 +284,32 @@ resource "aws_cognito_user_pool_domain" "staff" {
   domain       = "${var.name}-${var.expected_account_id}"
   user_pool_id = aws_cognito_user_pool.staff.id
 }
+resource "aws_cognito_user_pool_client" "android" {
+  name                                 = "${var.name}-android"
+  user_pool_id                         = aws_cognito_user_pool.staff.id
+  generate_secret                      = false
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = ["regipos://oauth"]
+  read_attributes                      = ["custom:tenant_id", "email", "email_verified"]
+  write_attributes                     = ["email"]
+  prevent_user_existence_errors        = "ENABLED"
+  access_token_validity                = 1
+  id_token_validity                    = 1
+  refresh_token_validity               = 30
+  token_validity_units {
+    access_token  = "hours"
+    id_token      = "hours"
+    refresh_token = "days"
+  }
+}
 resource "aws_ssm_parameter" "runtime" {
   name = local.runtime_path
   type = "String"
   value = jsonencode({
-    name      = var.name, issuer = "https://cognito-idp.ap-northeast-1.amazonaws.com/${aws_cognito_user_pool.staff.id}", clientId = aws_cognito_user_pool_client.web.id,
+    name      = var.name, issuer = "https://cognito-idp.ap-northeast-1.amazonaws.com/${aws_cognito_user_pool.staff.id}", clientId = aws_cognito_user_pool_client.web.id, androidClientId = aws_cognito_user_pool_client.android.id,
     webOrigin = "https://${aws_cloudfront_distribution.web.domain_name}", workloadRoleArn = aws_iam_role.workload.arn, bucket = aws_s3_bucket.private.id,
     queueUrl  = aws_sqs_queue.exports.url, releaseBucket = var.bootstrap_bucket, imageObjectKey = var.image_object_key, imageSha256 = var.image_sha256, image = "regi:sandbox", demo = var.demo, bedrockProfileArn = var.bedrock_profile_arn, requireMfa = var.require_mfa
   })

@@ -13,6 +13,11 @@ mock_provider "aws" {
   mock_resource "aws_cognito_user_pool_client" { defaults = { id = "synthetic-client" } }
   mock_resource "aws_cloudfront_distribution" { defaults = { domain_name = "synthetic.cloudfront.net" } }
 }
+override_resource {
+  target          = aws_cognito_user_pool_client.android
+  override_during = plan
+  values          = { id = "synthetic-android-client" }
+}
 variables {
   expected_account_id = "000000000001"
   alert_email         = "sandbox@example.invalid"
@@ -53,6 +58,25 @@ run "reject_unconfirmed_account" {
   command = plan
   variables { expected_account_id = "" }
   expect_failures = [var.expected_account_id]
+}
+run "separate_android_public_client" {
+  command = plan
+  assert {
+    condition     = aws_cognito_user_pool_client.android.user_pool_id == aws_cognito_user_pool.staff.id && !aws_cognito_user_pool_client.android.generate_secret && aws_cognito_user_pool_client.android.allowed_oauth_flows_user_pool_client && toset(aws_cognito_user_pool_client.android.allowed_oauth_flows) == toset(["code"]) && toset(aws_cognito_user_pool_client.android.allowed_oauth_scopes) == toset(["openid", "profile"]) && toset(aws_cognito_user_pool_client.android.callback_urls) == toset(["regipos://oauth"])
+    error_message = "Android must use its own public authorization-code client and exact PKCE callback."
+  }
+  assert {
+    condition     = aws_cognito_user_pool_client.android.refresh_token_validity == 30 && one(aws_cognito_user_pool_client.android.token_validity_units).refresh_token == "days" && aws_cognito_user_pool_client.android.access_token_validity == 1 && aws_cognito_user_pool_client.android.id_token_validity == 1 && one(aws_cognito_user_pool_client.android.token_validity_units).access_token == "hours" && one(aws_cognito_user_pool_client.android.token_validity_units).id_token == "hours" && aws_cognito_user_pool_client.web.refresh_token_validity == 1 && one(aws_cognito_user_pool_client.web.token_validity_units).refresh_token == "days"
+    error_message = "Android refresh lasts 30 days, ID/access tokens last one hour, and Web stays at one day."
+  }
+  assert {
+    condition     = !contains(aws_cognito_user_pool_client.android.write_attributes, "custom:tenant_id") && toset(aws_cognito_user_pool_client.android.read_attributes) == toset(aws_cognito_user_pool_client.web.read_attributes) && aws_cognito_user_pool_client.android.prevent_user_existence_errors == "ENABLED"
+    error_message = "Android must preserve immutable tenant claims and the existing Web attribute boundary."
+  }
+  assert {
+    condition     = jsondecode(aws_ssm_parameter.runtime.value).androidClientId == "synthetic-android-client" && jsondecode(aws_ssm_parameter.runtime.value).clientId == "synthetic-client" && output.deployment.android_client_id == "synthetic-android-client" && output.deployment.client_id == "synthetic-client"
+    error_message = "Distinct Web and Android client IDs must reach runtime and operator outputs."
+  }
 }
 run "reject_seed_without_actual_subject" {
   command = plan

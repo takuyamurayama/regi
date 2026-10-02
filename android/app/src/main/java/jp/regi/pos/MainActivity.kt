@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -47,6 +48,10 @@ fun Pos(repository: Repository, callback: Uri? = null) {
     var error by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf(0) }
+    var reviews by remember { mutableStateOf(emptyList<Event>()) }
+    var administratorLoginRequired by remember {
+        mutableStateOf(repository.network.oauth.requiresAdministratorLogin())
+    }
     var query by remember { mutableStateOf("") }
     var base by remember {
         mutableStateOf(if (BuildConfig.DEBUG) "http://10.0.2.2:3000" else "https://")
@@ -60,8 +65,12 @@ fun Pos(repository: Repository, callback: Uri? = null) {
     var method by remember { mutableStateOf("cash") }
     var taxContext by remember { mutableStateOf("master") }
     var discount by remember { mutableStateOf("0") }
-    var domain by remember { mutableStateOf("") }
-    var clientId by remember { mutableStateOf("") }
+    var domain by remember {
+        mutableStateOf(repository.network.oauth.configuration()?.optString("domain") ?: "")
+    }
+    var clientId by remember {
+        mutableStateOf(repository.network.oauth.configuration()?.optString("clientId") ?: "")
+    }
     var deviceName by remember { mutableStateOf("店舗POS") }
     var storeId by remember { mutableStateOf("") }
     var priceMode by remember { mutableStateOf("inclusive") }
@@ -72,6 +81,11 @@ fun Pos(repository: Repository, callback: Uri? = null) {
         products = repository.dao.search(query)
         history = repository.dao.history()
         pending = repository.dao.pendingCount()
+        reviews = repository.dao.reviews()
+        administratorLoginRequired = repository.network.oauth.requiresAdministratorLogin()
+        repository.dao.metadata(
+            Metadata("administratorLoginRequired", administratorLoginRequired.toString())
+        )
         staff =
             try {
                 repository.staff()
@@ -91,6 +105,12 @@ fun Pos(repository: Repository, callback: Uri? = null) {
             } catch (failure: Exception) {
                 error = "${failure.message}。入力・同期・端末結果を確認してください。"
             } finally {
+                pending = repository.dao.pendingCount()
+                reviews = repository.dao.reviews()
+                administratorLoginRequired = repository.network.oauth.requiresAdministratorLogin()
+                repository.dao.metadata(
+                    Metadata("administratorLoginRequired", administratorLoginRequired.toString())
+                )
                 busy = false
             }
         }
@@ -101,6 +121,16 @@ fun Pos(repository: Repository, callback: Uri? = null) {
             repository.enqueue()
         }
     }
+    LaunchedEffect(repository) {
+        while (true) {
+            val required = repository.network.oauth.requiresAdministratorLogin()
+            if (required != administratorLoginRequired) {
+                administratorLoginRequired = required
+                repository.dao.metadata(Metadata("administratorLoginRequired", required.toString()))
+            }
+            delay(1000)
+        }
+    }
     LaunchedEffect(callback) {
         if (callback != null)
             action {
@@ -108,6 +138,7 @@ fun Pos(repository: Repository, callback: Uri? = null) {
                 if (repository.dao.metadata("bootstrap") != null) repository.renewAuthentication()
                 val entries = repository.network.request("/v1/settings").getJSONArray("stores")
                 enrollmentStores = (0 until entries.length()).map { entries.getJSONObject(it) }
+                repository.enqueue()
             }
     }
     LaunchedEffect(history) {
@@ -131,11 +162,13 @@ fun Pos(repository: Repository, callback: Uri? = null) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("REGI POS", style = MaterialTheme.typography.headlineMedium)
-            Text("未送信 $pending 件 / オフライン上限72時間")
             listOf("販売", "履歴", "同期", "開局・締め", "店舗業務", "設定").forEach { label ->
                 TextButton(onClick = { page = label }) { Text(label) }
             }
         }
+        Text("未送信 $pending 件 / 要確認 ${reviews.size} 件 / オフライン上限72時間")
+        if (administratorLoginRequired)
+            Text("管理者の再ログインが必要", color = MaterialTheme.colorScheme.error)
         if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         when (page) {
@@ -158,7 +191,7 @@ fun Pos(repository: Repository, callback: Uri? = null) {
                     OutlinedTextField(
                         clientId,
                         { clientId = it },
-                        label = { Text("Cognito public client ID") },
+                        label = { Text("Android専用 Cognito client ID（変更して再ログイン）") },
                     )
                     Button(
                         enabled = !busy,
@@ -277,6 +310,14 @@ fun Pos(repository: Repository, callback: Uri? = null) {
                     Text("再送・差分取得")
                 }
                 Text("受領応答までは送信待ちを保持。要確認の元記録は削除しません。")
+                LazyColumn(Modifier.weight(1f)) {
+                    items(reviews, key = { it.id }) { event ->
+                        Text(
+                            "${event.id} / ${JSONObject(event.payload).optString("type")}\n${event.error ?: "管理者がサーバーの要確認一覧で確認してください"}",
+                            Modifier.padding(vertical = 8.dp),
+                        )
+                    }
+                }
             }
             "履歴" ->
                 LazyColumn {

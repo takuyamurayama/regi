@@ -52,9 +52,36 @@ interface PosDao {
     )
     suspend fun matching(query: String): List<Product>
 
+    @Query(
+        """
+        SELECT * FROM products
+        WHERE (instr(CAST(name AS BLOB),CAST(:query AS BLOB)) > 0
+               AND name GLOB '*' || :query || '*')
+           OR (instr(CAST(sku AS BLOB),CAST(:query AS BLOB)) > 0
+               AND sku GLOB '*' || :query || '*')
+        LIMIT 100
+        """
+    )
+    suspend fun matchingJapaneseLiteral(query: String): List<Product>
+
     suspend fun search(query: String): List<Product> {
         val found = if (query.isNotBlank()) exact(query) else emptyList()
-        return if (found.isNotEmpty()) found else matching(query).sortedBy { it.sku }
+        if (found.isNotEmpty()) return found
+        // Android ICU LIKE folds Unicode case. Only these uncased BMP characters use GLOB;
+        // the binary prefilter avoids decoding misses, and GLOB preserves termination at NUL.
+        // other inputs retain LIKE, including its wildcards, NUL and 50,000-byte pattern limit.
+        val literal =
+            query.isNotEmpty() &&
+                query.length <= 16384 &&
+                query.all {
+                    it in '0'..'9' ||
+                        it in '\u3041'..'\u3096' ||
+                        it in '\u30a1'..'\u30fa' ||
+                        it in '\u4e00'..'\u9fff'
+                }
+        return (if (literal) matchingJapaneseLiteral(query) else matching(query)).sortedBy {
+            it.sku
+        }
     }
 
     @Upsert suspend fun products(products: List<Product>)
@@ -76,7 +103,11 @@ interface PosDao {
     @Query("SELECT * FROM outbox WHERE status='pending' ORDER BY sequence LIMIT 100")
     suspend fun pending(): List<Event>
 
-    @Query("SELECT COUNT(*) FROM outbox WHERE status!='accepted'") suspend fun pendingCount(): Int
+    @Query("SELECT COUNT(*) FROM outbox WHERE status='pending'") suspend fun pendingCount(): Int
+
+    @Query("SELECT COUNT(*) FROM outbox WHERE status='review'") suspend fun reviewCount(): Int
+
+    @Query("SELECT * FROM outbox WHERE id=:id") suspend fun eventById(id: String): Event?
 
     @Query("SELECT COUNT(*) FROM checkouts WHERE status IN ('checking','unknown')")
     suspend fun unknownCount(): Int

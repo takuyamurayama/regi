@@ -84,6 +84,20 @@ test('棚卸の複数実査・隔離承認・遅延売上再照合を画面で�
   await page.getByLabel(`実査 ${second.name}`, { exact: true }).fill('75');
   await page.getByLabel('全隔離記録を原記録と照合しました').check();
   await page.getByLabel('棚卸隔離承認理由').fill('停止・原記録・二明細の実査を確認');
+  const blockedConfirmation = page.waitForResponse(
+    (response) => response.url().includes('/v1/stocktakes/') && response.url().endsWith('/confirm'),
+  );
+  await page.getByRole('button', { name: '実査全明細で棚卸確定', exact: true }).click();
+  const blockedResult = (await (await blockedConfirmation).json()) as { code: string };
+  expect(blockedResult.code).toBe('DEVICES_NOT_QUIET');
+  await expect(page.getByLabel('棚卸記録')).not.toHaveValue('');
+  const deviceStatus = (await command(`/v1/devices/${deviceId}/status`, {
+    stopped: true,
+    pending: 0,
+    reviewCount: 1,
+  })) as { pending: number; reviewCount: number };
+  expect(deviceStatus.pending).toBe(0);
+  expect(deviceStatus.reviewCount).toBe(1);
   await page.getByRole('button', { name: '実査全明細で棚卸確定', exact: true }).click();
   await expect(page.getByLabel('棚卸記録')).toHaveValue('');
   await page

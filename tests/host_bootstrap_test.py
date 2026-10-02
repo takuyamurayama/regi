@@ -68,6 +68,32 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bootstrap.authentication_environment({"demo": self.demo, "requireMfa": "false"})
 
+    def test_distinct_web_and_android_clients_reach_the_api_environment(self):
+        runtime = {
+            "issuer": "https://cognito.example.invalid/test",
+            "clientId": "web-test-client",
+            "androidClientId": "android-test-client",
+        }
+        self.assertEqual(bootstrap.cognito_environment(runtime), {
+            "COGNITO_ISSUER": runtime["issuer"],
+            "COGNITO_CLIENT_ID": "web-test-client",
+            "COGNITO_ANDROID_CLIENT_ID": "android-test-client",
+        })
+        target = self.directory / "app.env"
+        bootstrap.environment_file(target, bootstrap.cognito_environment(runtime))
+        self.assertIn("COGNITO_CLIENT_ID=web-test-client\n", target.read_text())
+        self.assertIn("COGNITO_ANDROID_CLIENT_ID=android-test-client\n", target.read_text())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+
+    def test_legacy_runtime_keeps_web_without_accepting_an_android_client(self):
+        runtime = {
+            "issuer": "https://cognito.example.invalid/test",
+            "clientId": "web-test-client",
+        }
+        self.assertEqual(bootstrap.cognito_environment(runtime)["COGNITO_ANDROID_CLIENT_ID"], "")
+        with self.assertRaises(ValueError):
+            bootstrap.cognito_environment({**runtime, "androidClientId": None})
+
 
 if __name__ == "__main__":
     unittest.main()

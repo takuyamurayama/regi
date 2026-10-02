@@ -4,7 +4,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
-import { Database, Actor, sql } from '../apps/api/src/db';
+import { writeFileSync } from 'node:fs';
+import { Database, Actor, rows, sql } from '../apps/api/src/db';
 import { Business, pinHash } from '../apps/api/src/service';
 
 interface ApiResult {
@@ -14,6 +15,11 @@ interface ApiResult {
   retryable?: boolean;
   count?: number;
   results?: { status: string }[];
+  ids?: string[];
+}
+interface ApiChanges {
+  cursor: string;
+  changes: { cursor: string; entity_id: string; kind: string }[];
 }
 async function unusedPort() {
   const server = createServer();
@@ -158,13 +164,111 @@ void test(
         Array.from(
           { length: 5000 },
           (_, index) =>
-            'CSV-' + String(index) + ',,日本語商品' + String(index) + ',100,50,standard,true',
+            'CSV-' +
+            String(index) +
+            ',,' +
+            '日本語商品'.repeat(38) +
+            String(index) +
+            ',100,50,standard,true',
         ).join('\n');
-      assert.ok(Buffer.byteLength(JSON.stringify({ csv })) > 100 * 1024);
-      const imported = await post('/v1/products/import', { operationId: randomUUID(), csv }),
+      assert.ok(Buffer.byteLength(JSON.stringify({ csv })) > 2 * 1024 * 1024);
+      const snapshot = () =>
+        database.transaction(actor, (transaction) =>
+          rows<{
+            products: number;
+            prices: number;
+            changes: number;
+            operations: number;
+            audits: number;
+            cursor: string;
+          }>(
+            transaction,
+            sql`SELECT (SELECT count(*)::int FROM products) AS products,(SELECT count(*)::int FROM prices) AS prices,(SELECT count(*)::int FROM changes) AS changes,(SELECT count(*)::int FROM operations) AS operations,(SELECT count(*)::int FROM audit) AS audits,(SELECT cursor::text FROM change_heads) AS cursor`,
+          ),
+        );
+      const before = (await snapshot())[0],
+        importInput = { operationId: randomUUID(), csv };
+      const imported = await post('/v1/products/import', importInput),
         importedBody = (await imported.json()) as ApiResult;
       assert.equal(imported.status, 201, JSON.stringify(importedBody));
       assert.equal(importedBody.count, 5000);
+      const ids = importedBody.ids;
+      assert.ok(ids);
+      assert.equal(new Set(ids).size, 5000);
+      const after = (await snapshot())[0];
+      assert.deepEqual(after, {
+        products: before.products + 5000,
+        prices: before.prices + 5000,
+        changes: before.changes + 5000,
+        operations: before.operations + 1,
+        audits: before.audits + 1,
+        cursor: (BigInt(before.cursor) + 5000n).toString(),
+      });
+      const productChanges = await database.transaction(actor, (transaction) =>
+        rows<{ cursor: string; entity_id: string }>(
+          transaction,
+          sql`SELECT cursor::text,entity_id FROM changes WHERE kind='product' AND cursor>${BigInt(before.cursor)} ORDER BY changes.cursor`,
+        ),
+      );
+      assert.deepEqual(
+        productChanges.map((record) => record.entity_id),
+        ids,
+      );
+      assert.deepEqual(
+        productChanges.map((record) => record.cursor),
+        Array.from({ length: 5000 }, (_, index) =>
+          (BigInt(before.cursor) + BigInt(index + 1)).toString(),
+        ),
+      );
+      let cursor = before.cursor;
+      const delivered: string[] = [];
+      while (BigInt(cursor) < BigInt(after.cursor)) {
+        const response = await fetch(base + '/v1/sync/changes?cursor=' + cursor, {
+          headers: { 'x-tenant-id': tenant, 'x-staff-subject': tenant },
+        });
+        assert.equal(response.status, 200);
+        const page = (await response.json()) as ApiChanges;
+        assert.equal(page.changes.length, 1000);
+        assert.deepEqual(
+          page.changes.map((record) => record.cursor),
+          Array.from({ length: 1000 }, (_, index) =>
+            (BigInt(cursor) + BigInt(index + 1)).toString(),
+          ),
+        );
+        assert.ok(page.changes.every((record) => record.kind === 'product'));
+        delivered.push(...page.changes.map((record) => record.entity_id));
+        assert.equal(page.cursor, page.changes.at(-1)?.cursor);
+        cursor = page.cursor;
+      }
+      assert.equal(cursor, after.cursor);
+      assert.deepEqual(delivered, ids);
+      const replay = await post('/v1/products/import', importInput);
+      assert.equal(replay.status, 201);
+      assert.deepEqual(await replay.json(), importedBody);
+      assert.deepEqual((await snapshot())[0], after);
+      for (const failure of ['duplicate', 'tax']) {
+        const brokenCsv =
+          'sku,jan,name,price,cost,taxCode,stockManaged\n' +
+          Array.from(
+            { length: 501 },
+            (_, index) =>
+              (index === 500 && failure === 'duplicate' ? 'CSV-0' : `ROLLBACK-${index}`) +
+              `,,原子性試験,100,50,${index === 500 && failure === 'tax' ? 'missing-tax' : 'standard'},true`,
+          ).join('\n');
+        const failed = await post('/v1/products/import', {
+          operationId: randomUUID(),
+          csv: brokenCsv,
+        });
+        assert.equal(failed.status, failure === 'duplicate' ? 500 : 400);
+        assert.deepEqual((await snapshot())[0], after);
+        const rollback = await database.transaction(actor, (transaction) =>
+          rows<{ count: number }>(
+            transaction,
+            sql`SELECT count(*)::int AS count FROM products WHERE sku LIKE 'ROLLBACK-%'`,
+          ),
+        );
+        assert.equal(rollback[0].count, 0);
+      }
       for (const [path, body] of [
         ['/v1/sync/events', { events: [], padding: 'x'.repeat(4 * 1024 * 1024) }],
         ['/v1/products/import', { operationId: randomUUID(), csv: 'x'.repeat(5 * 1024 * 1024) }],
@@ -180,6 +284,7 @@ void test(
         assert.ok(!result.message.includes('too large'));
       }
     } finally {
+      writeFileSync('.context/d0-payload-limit-server.log', output);
       server.kill('SIGTERM');
       if (server.exitCode === null)
         await Promise.race([

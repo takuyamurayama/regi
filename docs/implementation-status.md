@@ -488,3 +488,15 @@ PrismaのDB障害を要確認へ誤分類していた同期処理を修正した
 pg8のsimple queryによるファイル単位migration、非transactionヘッダーのSQL分割、SHA-256台帳・改変時起動拒否、SCRAMの000_roles、007の5状態・quarantine/FORCE RLS・active subject部分一意制約を追加した。既存001〜006は変更せず、旧版番号のみの台帳は説明付きでchecksumを一度採用する。適用済み000があってもアプリロールの危険な権限変更を起動時に拒否する。空DBの000〜007・checksum・権限・RLSを実PGで検査した。quarantineを既存retentionの削除順にも追加した。
 
 第2週の最終回帰はNode93/93、ブラウザー20/20、manifest113一致、skip0。Dockerの本番設定health200・healthy、保守import・空DBmigration・Python5/5、型・lint・整形・audit0・秘密scan0、両Terraform validateとsandbox mock6/6を確認した。意図的な衝突を作る既存試験は、元acceptedのbody/hash/resultが不変であることを検査し、試験内で隔離イベントへ理由・承認者付きdismissedを記録してから、従来の棚卸・契約期限の期待値を検査する。実AWS障害注入・実時間受入は未実施。
+
+## D0 第3週の終端状態・端末資格（2026-10-02・ローカル検証完了）
+
+管理者・本部の理由付き却下、承認者と監査、却下済み連番の終端判定を追加した。隔離された原記録と既存acceptedを区別し、却下・再検証・依存待ちの再送成功をdevice-event changesで配信する。単一開局の競合を既存開局へ対応付け、端末にはaccepted/review/retryだけを返す。却下済み再送でも対応先の開局ID・準備金を返し、Androidは原イベントを変更せず現開局の対応だけを更新する。
+
+Android専用Cognito public client、PKCE、30日refresh、Web/Android両audienceを追加した。初回ログインから30日未満の更新とちょうど30日の失効を時計試験で検査する。refresh更新で元の有効期限は延びない。invalid_grantはtokensを破棄し、再ログイン成功まで常時警告を表示する。client切替と古い応答の競合は、要求開始時のconfiguration/tokensを一緒に固定して防ぐ。会計・outboxは消さない。実Cognitoとsandbox累計実時間はMac側の受入として残る。
+
+Room version4・entities・列・migrationを維持し、pendingとreviewを分離した。同期は100件かつ実JSONのUTF-8 256KiB以内に分割して未送信を排出する。HTML/空bodyの413でも原記録を保持して件数を減らし、単一イベント超過は無限再送せず管理者確認へ進む。全種別のdevice-event差分と端末別review照合で端末状態を修復する。詳細は [同期プロトコル](architecture/sync-protocol.md) を参照。
+
+5,000行CSVの回帰で、大量の逐次SQLと内側に残る1MiB制限を検出し、5MiBの入力契約と原子的な一括INSERTへ修正した。商品・価格・変更履歴・カーソル・冪等再送と、後半の不正行で全体rollbackすることを検査する。changesのORDER BYが文字列へ変換したcursorを並べ、1000以降の取得を飛ばす問題もRed→Greenで修正した。
+
+最終Node104/104、Web20/20、skip0、manifest124一致、既存91名の欠落0。C87新規7件と署名付き両audience新規4件を含む。AndroidはJVM7/7、追加接続17/17、既存接続8/8が成功した。元50,000SKU・60サンプル・p95<300msの基準を維持し、連続166ms・153ms、会計確定184ms（元1秒未満）で合格。ICU LIKEのUnicode・wildcard・NULの意味を独立した旧SELECT *のoracleで検査し、限定された日本語BMP・数字だけBLOB前判定とGLOBを併用した。Room4・schema・index・完全一致優先・先頭100件・SKU順を維持している。強制終了後の別PID4448→4498で、確認待ち会計2,159円の保持・二重確定防止・同期・締めまで復元を確認した。型・lint予算・整形・秘密scanも合格。今回のソースはAWSへ未適用。実Cognito・sandbox実時間・実機と画面回転は未受入として残す。

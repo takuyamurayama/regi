@@ -19,6 +19,31 @@ interface StoredSyncEvent {
   status: string;
   result: SyncResult;
 }
+interface ReviewEvent extends StoredSyncEvent {
+  id: string;
+  device_id: string;
+  store_id: string;
+  body: Record<string, unknown>;
+  source: 'main' | 'quarantine';
+  dismissed_by: string | null;
+  dismiss_reason: string | null;
+}
+function singleOpenShiftConflict(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  if (error.code === '23505')
+    return 'constraint' in error && error.constraint === 'single_open_shift';
+  if (error.code !== 'P2010' || !('meta' in error)) return false;
+  const meta = error.meta;
+  return (
+    typeof meta === 'object' &&
+    meta !== null &&
+    'code' in meta &&
+    meta.code === '23505' &&
+    'message' in meta &&
+    typeof meta.message === 'string' &&
+    /\bsingle_open_shift\b/u.test(meta.message)
+  );
+}
 const syncRetryMessage = '同期処理を完了できませんでした。同じイベントを再送してください。';
 function syncEventId(raw: unknown): string | null {
   if (typeof raw !== 'object' || raw === null || !('id' in raw)) return null;
@@ -27,6 +52,20 @@ function syncEventId(raw: unknown): string | null {
 const uuid = z.uuid();
 const integer = z.number().int().min(1).max(10000);
 const amount = z.string().regex(/^(0|[1-9][0-9]{0,29})$/);
+function dismissedAcknowledgement(id: string, result: unknown): SyncResult {
+  const parsed = z
+    .object({ shiftId: uuid.optional(), opening: amount.optional() })
+    .safeParse(result);
+  const alias = parsed.success ? parsed.data : undefined;
+  return {
+    id,
+    status: 'accepted',
+    resolution: 'dismissed',
+    ...(alias?.shiftId
+      ? { shiftId: alias.shiftId, ...(alias.opening ? { opening: alias.opening } : {}) }
+      : {}),
+  };
+}
 const terminalSchema = z.object({
   id: uuid,
   deviceId: uuid,
@@ -187,9 +226,18 @@ export class Business {
     storeId: string | null,
     id: string = randomUUID(),
   ) {
-    await transaction.$executeRaw(
-      sql`INSERT INTO documents(id,tenant_id,store_id,kind,status,body,actor_id) VALUES(${id}::uuid,${actor.tenantId}::uuid,${storeId}::uuid,${kind},${status},${json(body)}::jsonb,${actor.staffId}::uuid)`,
-    );
+    try {
+      await transaction.$executeRaw(
+        sql`INSERT INTO documents(id,tenant_id,store_id,kind,status,body,actor_id) VALUES(${id}::uuid,${actor.tenantId}::uuid,${storeId}::uuid,${kind},${status},${json(body)}::jsonb,${actor.staffId}::uuid)`,
+      );
+    } catch (error: unknown) {
+      if (kind === 'shift' && status === 'open' && singleOpenShiftConflict(error))
+        throw new BusinessError(
+          'SHIFT_OPEN_CONFLICT',
+          '端末は既に開局しています。既存の開局と照合してください',
+        );
+      throw error;
+    }
     const result = { id, kind, status, body, storeId };
     await this.change(transaction, actor, kind, id, result, storeId);
     return result;
@@ -486,7 +534,7 @@ export class Business {
     return this.database.transaction(actor, async (transaction) => {
       const entries = await rows(
         transaction,
-        sql`SELECT cursor::text,kind,entity_id,store_id,body FROM changes WHERE cursor>${BigInt(cursor)} ORDER BY cursor LIMIT 1000`,
+        sql`SELECT cursor::text,kind,entity_id,store_id,body FROM changes WHERE cursor>${BigInt(cursor)} ORDER BY changes.cursor LIMIT 1000`,
       );
       const [head] = await rows(transaction, sql`SELECT cursor::text FROM change_heads`);
       return {
@@ -528,37 +576,33 @@ export class Business {
               transaction,
               sql`SELECT hash,status,result FROM device_events WHERE id=${event.id}::uuid`,
             );
-            if (prior) {
-              requireRule(prior.hash === hash, 'IDEMPOTENCY_CONFLICT', 'イベント内容が異なります');
+            const [quarantined] = await rows<StoredSyncEvent>(
+              transaction,
+              sql`SELECT hash,status,result FROM device_event_quarantine WHERE id=${event.id}::uuid`,
+            );
+            if (quarantined?.hash === hash && !['waiting', 'pending'].includes(quarantined.status))
+              return quarantined.status === 'dismissed'
+                ? dismissedAcknowledgement(event.id, quarantined.result)
+                : quarantined.result;
+            if (prior?.hash === hash) {
               if (prior.status === 'waiting' || prior.status === 'pending') {
                 await transaction.$executeRaw(
                   sql`DELETE FROM device_events WHERE id=${event.id}::uuid`,
                 );
               } else {
                 return prior.status === 'dismissed'
-                  ? { id: event.id, status: 'accepted' as const }
+                  ? dismissedAcknowledgement(event.id, prior.result)
                   : prior.result;
               }
-            }
-            const [quarantined] = await rows<StoredSyncEvent>(
-              transaction,
-              sql`SELECT hash,status,result FROM device_event_quarantine WHERE id=${event.id}::uuid`,
-            );
-            if (quarantined) {
-              requireRule(
-                quarantined.hash === hash,
-                'IDEMPOTENCY_CONFLICT',
-                'イベント内容が異なります',
+            } else if (prior && quarantined?.hash !== hash)
+              throw new BusinessError('IDEMPOTENCY_CONFLICT', 'イベント内容が異なります');
+            if (quarantined?.hash === hash) {
+              await transaction.$executeRaw(
+                sql`DELETE FROM device_event_quarantine WHERE id=${event.id}::uuid`,
               );
-              if (quarantined.status === 'dismissed')
-                return { id: event.id, status: 'accepted' as const };
-              if (quarantined.status === 'waiting' || quarantined.status === 'pending') {
-                await transaction.$executeRaw(
-                  sql`DELETE FROM device_event_quarantine WHERE id=${event.id}::uuid`,
-                );
-              } else return quarantined.result;
-            }
-            return (
+            } else if (!prior && quarantined)
+              throw new BusinessError('IDEMPOTENCY_CONFLICT', 'イベント内容が異なります');
+            const result = (
               event.type === 'sale'
                 ? await this.sale(transaction, actor, event as z.infer<typeof saleSchema>, hash)
                 : await this.terminalEvent(
@@ -568,18 +612,41 @@ export class Business {
                     hash,
                   )
             ) as SyncResult;
+            if (
+              (prior?.hash === hash && ['pending', 'waiting'].includes(prior.status)) ||
+              (quarantined?.hash === hash && ['pending', 'waiting'].includes(quarantined.status))
+            )
+              await this.change(
+                transaction,
+                actor,
+                'device-event',
+                event.id,
+                { id: event.id, status: 'accepted' },
+                (
+                  await rows<{ store_id: string }>(
+                    transaction,
+                    sql`SELECT store_id FROM devices WHERE id=${event.deviceId}::uuid`,
+                  )
+                )[0].store_id,
+              );
+            return result;
           });
           results.push(accepted);
           continue;
         } catch (error: unknown) {
-          const business = error instanceof BusinessError;
+          const opening = terminalSchema.safeParse(raw);
+          const failure =
+            opening.success && opening.data.type === 'shift.open'
+              ? await this.openingError(actor, opening.data.deviceId, error)
+              : error;
+          const business = failure instanceof BusinessError;
           const retry =
-            !business || error.code === 'SYNC_DEPENDENCY' || error.code === 'SEQUENCE_CONFLICT';
+            !business || failure.code === 'SYNC_DEPENDENCY' || failure.code === 'SEQUENCE_CONFLICT';
           result = {
             id: syncEventId(raw),
             status: retry ? 'retry' : 'review',
-            code: business ? error.code : 'SYNC_RETRY',
-            message: business ? error.message : syncRetryMessage,
+            code: business ? failure.code : 'SYNC_RETRY',
+            message: business ? failure.message : syncRetryMessage,
           };
           if (!business) stopBatch = true;
         }
@@ -638,6 +705,13 @@ export class Business {
       );
       requireRule(device, 'DEVICE_NOT_FOUND', '端末がありません', 404);
       this.access(actor, device.store_id);
+      if (result.code === 'SHIFT_OPEN_CONFLICT') {
+        const [shift] = await rows<{ id: string; body: { opening: string } }>(
+          transaction,
+          sql`SELECT id,body FROM documents WHERE kind='shift' AND status='open' AND store_id=${device.store_id}::uuid AND body->>'deviceId'=${event.deviceId}`,
+        );
+        if (shift) result = { ...result, shiftId: shift.id, opening: shift.body.opening };
+      }
       const [existing] = await rows<StoredSyncEvent>(
         transaction,
         sql`SELECT hash,status,result FROM device_events WHERE id=${event.id}::uuid`,
@@ -676,6 +750,50 @@ export class Business {
       }
       return result;
     });
+  }
+  private async openingError(actor: Actor, deviceId: string, error: unknown): Promise<unknown> {
+    if (singleOpenShiftConflict(error))
+      return new BusinessError(
+        'SHIFT_OPEN_CONFLICT',
+        '端末は既に開局しています。既存の開局と照合してください',
+      );
+    if (
+      typeof error !== 'object' ||
+      error === null ||
+      !('code' in error) ||
+      error.code !== 'P2010' ||
+      !('meta' in error)
+    )
+      return error;
+    const meta = error.meta;
+    if (
+      typeof meta !== 'object' ||
+      meta === null ||
+      !('code' in meta) ||
+      meta.code !== '23505' ||
+      !('message' in meta) ||
+      meta.message !== 'Unique constraint failed: '
+    )
+      return error;
+    // Prisma omits the raw-query constraint name; confirm the domain conflict after rollback.
+    try {
+      const existing = await this.database.transaction(actor, async (transaction) => {
+        const [open] = await rows<{ id: string; store_id: string }>(
+          transaction,
+          sql`SELECT s.id,s.store_id FROM documents s JOIN devices d ON d.id=${deviceId}::uuid AND s.store_id=d.store_id WHERE s.kind='shift' AND s.status='open' AND s.body->>'deviceId'=${deviceId}`,
+        );
+        if (open) this.access(actor, open.store_id);
+        return open;
+      });
+      if (existing)
+        return new BusinessError(
+          'SHIFT_OPEN_CONFLICT',
+          '端末は既に開局しています。既存の開局と照合してください',
+        );
+    } catch {
+      return error;
+    }
+    return error;
   }
   async terminalEvent(
     transaction: Tx,
@@ -737,6 +855,15 @@ export class Business {
     const operator = { ...actor, staffId: event.staffId };
     let record: any;
     if (event.type === 'shift.open') {
+      const [open] = await rows<{ id: string }>(
+        transaction,
+        sql`SELECT id FROM documents WHERE kind='shift' AND status='open' AND store_id=${device.store_id}::uuid AND body->>'deviceId'=${event.deviceId}`,
+      );
+      requireRule(
+        !open,
+        'SHIFT_OPEN_CONFLICT',
+        '端末は既に開局しています。既存の開局と照合してください',
+      );
       const [stocktake] = await rows(
         transaction,
         sql`SELECT id FROM documents WHERE kind='stocktake' AND status='pending' AND store_id=${device.store_id}::uuid`,
@@ -753,7 +880,11 @@ export class Business {
         event.id,
       );
     } else {
-      const shiftId = parse(uuid, event.body.shiftId),
+      const shiftId = await this.resolveShiftId(
+          transaction,
+          event.deviceId,
+          parse(uuid, event.body.shiftId),
+        ),
         [shift] = await rows(
           transaction,
           sql`SELECT * FROM documents WHERE id=${shiftId}::uuid AND kind='shift' FOR UPDATE`,
@@ -788,10 +919,14 @@ export class Business {
         requireRule(shift.status === 'open', 'SHIFT_STATE', '端末は締め済みです');
         const [received] = await rows(
           transaction,
-          sql`SELECT count(*)::bigint AS count FROM device_events WHERE device_id=${event.deviceId}::uuid AND sequence<${BigInt(event.sequence)} AND status='accepted'`,
+          sql`SELECT count(DISTINCT sequence)::bigint AS count FROM (SELECT sequence FROM device_events WHERE device_id=${event.deviceId}::uuid AND sequence<${BigInt(event.sequence)} AND status IN ('accepted','dismissed') UNION ALL SELECT sequence FROM device_event_quarantine WHERE device_id=${event.deviceId}::uuid AND sequence<${BigInt(event.sequence)} AND status IN ('accepted','dismissed')) terminal`,
+        );
+        const [unresolved] = await rows<{ id: string }>(
+          transaction,
+          sql`SELECT id FROM device_events WHERE device_id=${event.deviceId}::uuid AND sequence<${BigInt(event.sequence)} AND status NOT IN ('accepted','dismissed') UNION ALL SELECT id FROM device_event_quarantine WHERE device_id=${event.deviceId}::uuid AND sequence<${BigInt(event.sequence)} AND status NOT IN ('accepted','dismissed') LIMIT 1`,
         );
         requireRule(
-          BigInt(received.count) === BigInt(event.sequence) - 1n,
+          !unresolved && BigInt(received.count) === BigInt(event.sequence) - 1n,
           'SYNC_DEPENDENCY',
           '締めより前の全イベントを先に同期してください',
         );
@@ -910,9 +1045,14 @@ export class Business {
       sql`SELECT id FROM device_events WHERE device_id=${event.deviceId}::uuid AND sequence=${BigInt(event.sequence)}`,
     );
     requireRule(!duplicate, 'SEQUENCE_CONFLICT', '端末連番が重複しています');
+    const resolvedShiftId = await this.resolveShiftId(
+      transaction,
+      event.deviceId,
+      event.body.shiftId,
+    );
     const [shift] = await rows(
       transaction,
-      sql`SELECT * FROM documents WHERE id=${event.body.shiftId}::uuid AND kind='shift' FOR UPDATE`,
+      sql`SELECT * FROM documents WHERE id=${resolvedShiftId}::uuid AND kind='shift' FOR UPDATE`,
     );
     requireRule(shift, 'SYNC_DEPENDENCY', '開局イベントの受領待ちです');
     requireRule(
@@ -1021,7 +1161,7 @@ export class Business {
         tendered: event.body.tendered ?? null,
         reference: event.body.reference ?? null,
         deviceId: event.deviceId,
-        shiftId: event.body.shiftId,
+        shiftId: resolvedShiftId,
         paymentStartedAt: event.body.paymentStartedAt ?? event.occurredAt,
         occurredAt: event.occurredAt,
         businessDate: businessDate(event.occurredAt),
@@ -1062,44 +1202,195 @@ export class Business {
     );
     return result;
   }
-  async reviews(actor: Actor, storeId: string) {
-    this.access(actor, storeId, ['admin', 'headquarters', 'manager']);
-    return this.database.transaction(actor, (transaction) =>
-      rows(
-        transaction,
-        sql`SELECT * FROM device_events WHERE store_id=${storeId}::uuid AND status='review' ORDER BY created_at`,
-      ),
+  private async resolveShiftId(
+    transaction: Tx,
+    deviceId: string,
+    requested: string,
+  ): Promise<string> {
+    const [direct] = await rows<{ id: string }>(
+      transaction,
+      sql`SELECT id FROM documents WHERE id=${requested}::uuid AND kind='shift' AND body->>'deviceId'=${deviceId}`,
     );
+    if (direct) return direct.id;
+    const [alias] = await rows<{ shift_id: string | null }>(
+      transaction,
+      sql`SELECT result->>'shiftId' AS shift_id FROM device_events WHERE id=${requested}::uuid AND device_id=${deviceId}::uuid AND status='dismissed' AND body->>'type'='shift.open' UNION ALL SELECT result->>'shiftId' AS shift_id FROM device_event_quarantine WHERE id=${requested}::uuid AND device_id=${deviceId}::uuid AND status='dismissed' AND body->>'type'='shift.open' LIMIT 1`,
+    );
+    return alias?.shift_id && uuid.safeParse(alias.shift_id).success ? alias.shift_id : requested;
   }
-  async retryReview(actor: Actor, id: string, input: any) {
-    this.access(actor, input.storeId, ['admin', 'headquarters', 'manager']);
+  async reviews(actor: Actor, storeId: string, deviceId?: string) {
+    this.access(actor, storeId, deviceId ? undefined : ['admin', 'headquarters', 'manager']);
+    if (deviceId) parse(uuid, deviceId);
     requireRule(
-      typeof input.reason === 'string' && input.reason.trim(),
+      !actor.deviceId || actor.deviceId === deviceId,
+      'RECOVERY_SCOPE',
+      '回収範囲が異なります',
+      403,
+    );
+    return this.database.transaction(actor, async (transaction) => {
+      if (deviceId) {
+        const [device] = await rows<{ id: string }>(
+          transaction,
+          sql`SELECT id FROM devices WHERE id=${deviceId}::uuid AND store_id=${storeId}::uuid`,
+        );
+        requireRule(device, 'DEVICE_NOT_FOUND', '端末がありません', 404);
+      }
+      return rows<ReviewEvent>(
+        transaction,
+        sql`SELECT *, 'main'::text AS source FROM device_events WHERE store_id=${storeId}::uuid AND (${deviceId ?? null}::uuid IS NULL OR device_id=${deviceId ?? null}::uuid) AND (status='review' OR (${deviceId ?? null}::uuid IS NULL AND status IN ('pending','waiting'))) UNION ALL SELECT *, 'quarantine'::text AS source FROM device_event_quarantine WHERE store_id=${storeId}::uuid AND (${deviceId ?? null}::uuid IS NULL OR device_id=${deviceId ?? null}::uuid) AND (status='review' OR (${deviceId ?? null}::uuid IS NULL AND status IN ('pending','waiting'))) ORDER BY created_at,id`,
+      );
+    });
+  }
+  private reviewAction(input: unknown) {
+    const reason =
+      typeof input === 'object' && input !== null && 'reason' in input ? input.reason : undefined;
+    requireRule(
+      typeof reason === 'string' && reason.trim(),
       'REASON_REQUIRED',
       '原記録・決済結果を照合した承認理由が必要です',
       400,
     );
+    return parse(
+      z.object({
+        operationId: uuid,
+        storeId: uuid,
+        reason: z.string().trim().min(1).max(1000),
+        inventoryIncludedInCount: z.boolean().optional(),
+        source: z.enum(['main', 'quarantine']).optional(),
+      }),
+      input,
+    );
+  }
+  private async reviewEvent(
+    transaction: Tx,
+    id: string,
+    storeId: string,
+    source?: 'main' | 'quarantine',
+  ) {
+    const main = await rows<ReviewEvent>(
+      transaction,
+      sql`SELECT *, 'main'::text AS source FROM device_events WHERE id=${id}::uuid AND store_id=${storeId}::uuid FOR UPDATE`,
+    );
+    const quarantine = await rows<ReviewEvent>(
+      transaction,
+      sql`SELECT *, 'quarantine'::text AS source FROM device_event_quarantine WHERE id=${id}::uuid AND store_id=${storeId}::uuid FOR UPDATE`,
+    );
+    const records = [...main, ...quarantine].filter(
+      (record) => !source || record.source === source,
+    );
+    return (
+      records.find((record) => ['review', 'waiting', 'pending'].includes(record.status)) ??
+      records.find((record) => record.status === 'dismissed') ??
+      records[0]
+    );
+  }
+  async dismissReview(actor: Actor, id: string, input: unknown) {
+    const data = this.reviewAction(input);
+    parse(uuid, id);
+    this.access(actor, data.storeId, ['admin', 'headquarters']);
     return this.mutation(
       actor,
-      { ...input, targetId: id ?? null },
-      'review.retry',
-      input.storeId,
+      { ...data, targetId: id },
+      'review.dismiss',
+      data.storeId,
       async (transaction) => {
-        const [record] = await rows(
-          transaction,
-          sql`SELECT * FROM device_events WHERE id=${parse(uuid, id)}::uuid AND store_id=${input.storeId}::uuid FOR UPDATE`,
-        );
+        const record = await this.reviewEvent(transaction, id, data.storeId, data.source);
         requireRule(record, 'NOT_FOUND', '要確認イベントがありません', 404);
-        if (record.status === 'accepted') return record.result;
-        requireRule(record.status === 'review', 'REVIEW_STATE', '対象の状態が異なります');
-        await transaction.$executeRaw(sql`DELETE FROM device_events WHERE id=${id}::uuid`);
-        return record.body.type === 'sale'
-          ? this.sale(transaction, actor, parse(saleSchema, record.body), record.hash, {
-              reason: input.reason,
-              approvedBy: actor.staffId,
-              inventoryIncludedInCount: input.inventoryIncludedInCount,
-            })
-          : this.terminalEvent(transaction, actor, parse(terminalSchema, record.body), record.hash);
+        if (record.status === 'dismissed') return record.result;
+        requireRule(
+          ['review', 'waiting', 'pending'].includes(record.status),
+          'REVIEW_STATE',
+          '対象の状態が異なります',
+        );
+        const shiftId =
+          typeof record.result.shiftId === 'string' ? record.result.shiftId : undefined;
+        const opening =
+          typeof record.result.opening === 'string' ? record.result.opening : undefined;
+        const result: SyncResult = {
+          id,
+          status: 'accepted',
+          resolution: 'dismissed',
+          ...(shiftId ? { shiftId } : {}),
+          ...(opening ? { opening } : {}),
+        };
+        if (record.source === 'main')
+          await transaction.$executeRaw(
+            sql`UPDATE device_events SET status='dismissed',dismissed_by=${actor.staffId}::uuid,dismiss_reason=${data.reason},result=${json(result)}::jsonb WHERE id=${id}::uuid`,
+          );
+        else
+          await transaction.$executeRaw(
+            sql`UPDATE device_event_quarantine SET status='dismissed',dismissed_by=${actor.staffId}::uuid,dismiss_reason=${data.reason},result=${json(result)}::jsonb WHERE id=${id}::uuid`,
+          );
+        await this.change(
+          transaction,
+          actor,
+          'device-event',
+          id,
+          {
+            id,
+            status: 'dismissed',
+            ...(shiftId ? { shiftId } : {}),
+            ...(opening ? { opening } : {}),
+          },
+          data.storeId,
+        );
+        return result;
+      },
+      true,
+    );
+  }
+  async retryReview(actor: Actor, id: string, input: unknown) {
+    const data = this.reviewAction(input);
+    parse(uuid, id);
+    this.access(actor, data.storeId, ['admin', 'headquarters', 'manager']);
+    return this.mutation(
+      actor,
+      { ...data, targetId: id },
+      'review.retry',
+      data.storeId,
+      async (transaction) => {
+        const record = await this.reviewEvent(transaction, id, data.storeId, data.source);
+        requireRule(record, 'NOT_FOUND', '要確認イベントがありません', 404);
+        if (record.status === 'accepted' || record.status === 'dismissed') return record.result;
+        requireRule(
+          ['review', 'waiting', 'pending'].includes(record.status),
+          'REVIEW_STATE',
+          '対象の状態が異なります',
+        );
+        if (record.source === 'main')
+          await transaction.$executeRaw(sql`DELETE FROM device_events WHERE id=${id}::uuid`);
+        else
+          await transaction.$executeRaw(
+            sql`DELETE FROM device_event_quarantine WHERE id=${id}::uuid`,
+          );
+        const isSale =
+          typeof record.body === 'object' &&
+          record.body !== null &&
+          'type' in record.body &&
+          record.body.type === 'sale';
+        const result = (
+          isSale
+            ? await this.sale(transaction, actor, parse(saleSchema, record.body), record.hash, {
+                reason: data.reason,
+                approvedBy: actor.staffId,
+                inventoryIncludedInCount: data.inventoryIncludedInCount,
+              })
+            : await this.terminalEvent(
+                transaction,
+                actor,
+                parse(terminalSchema, record.body),
+                record.hash,
+              )
+        ) as SyncResult;
+        await this.change(
+          transaction,
+          actor,
+          'device-event',
+          id,
+          { id, status: 'accepted' },
+          data.storeId,
+        );
+        return result;
       },
       true,
     );
@@ -1652,6 +1943,7 @@ export class Business {
         storeId: uuid,
         stopped: z.boolean(),
         pending: z.number().int().min(0),
+        reviewCount: z.number().int().min(0).default(0),
       }),
       input,
     );
@@ -1669,10 +1961,15 @@ export class Business {
           requireRule(!lock, 'STOCKTAKE_ACTIVE', '棚卸中は端末の販売停止を解除できません');
         }
         const changed = await transaction.$executeRaw(
-          sql`UPDATE devices SET stopped=${input.stopped},pending=${input.pending},last_sync=now() WHERE id=${parse(uuid, id)}::uuid AND store_id=${input.storeId}::uuid`,
+          sql`UPDATE devices SET stopped=${input.stopped},pending=${input.pending},review_count=${input.reviewCount ?? 0},last_sync=now() WHERE id=${parse(uuid, id)}::uuid AND store_id=${input.storeId}::uuid`,
         );
         requireRule(changed === 1, 'DEVICE_NOT_FOUND', '端末がありません', 404);
-        return { id, stopped: input.stopped, pending: input.pending };
+        return {
+          id,
+          stopped: input.stopped,
+          pending: input.pending,
+          reviewCount: input.reviewCount ?? 0,
+        };
       },
     );
   }
@@ -1763,11 +2060,7 @@ export class Business {
           sql`SELECT * FROM devices WHERE store_id=${input.storeId}::uuid AND active`,
         );
         requireRule(
-          devices.every(
-            (device) =>
-              device.stopped &&
-              device.pending <= reviews.filter((review) => review.device_id === device.id).length,
-          ),
+          devices.every((device) => device.stopped && device.pending === 0),
           'DEVICES_NOT_QUIET',
           '未送信・未完了会計を解消し、端末の販売停止を維持してください',
         );
@@ -1866,6 +2159,15 @@ export class Business {
           sql`SELECT * FROM devices WHERE id=${input.deviceId}::uuid AND store_id=${input.storeId}::uuid AND active AND NOT stopped`,
         );
         requireRule(device, 'DEVICE_STOPPED', '端末登録・販売停止状態を確認してください');
+        const [existingOpen] = await rows<{ id: string }>(
+          transaction,
+          sql`SELECT id FROM documents WHERE kind='shift' AND status='open' AND store_id=${input.storeId}::uuid AND body->>'deviceId'=${input.deviceId}`,
+        );
+        requireRule(
+          !existingOpen,
+          'SHIFT_OPEN_CONFLICT',
+          '端末は既に開局しています。既存の開局と照合してください',
+        );
         return this.createDocument(
           transaction,
           actor,
@@ -1875,7 +2177,9 @@ export class Business {
           input.storeId,
         );
       },
-    );
+    ).catch(async (error: unknown) => {
+      throw await this.openingError(actor, parse(uuid, input.deviceId), error);
+    });
   }
   async cash(actor: Actor, input: any) {
     parse(

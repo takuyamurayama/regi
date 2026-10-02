@@ -82,9 +82,9 @@ NODE_ENV=test npx tsx scripts/restore-test.ts
 NODE_ENV=test REGI_LOAD_BASEURL=http://localhost:3000 npx tsx scripts/load-test.ts
 ```
 
-`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web の6ファイル（現時点18件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点53件、PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
+`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web の6ファイル（現時点18件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点86件、PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
 
-`tests/manifest.txt` は既存 Node 71件・ブラウザー20件を保持し、D0追加を含む現在の Node 93件・ブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
+`tests/manifest.txt` は既存 Node 71件・ブラウザー20件を保持し、D0追加を含む現在の Node 104件・ブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
 
 Web 操作試験は migration・seed 済みの DB と Google Chrome (`/usr/bin/google-chrome`) を前提とします。Playwright の `webServer` が API と Web を起動して終了時に停止します。ローカルでは既存のサーバーを再利用できるため、変更後は現行 build で再起動してください。CI では再利用せず、毎回起動します。
 
@@ -121,7 +121,7 @@ Android 接続試験はホスト API を利用し、毎回独立した試験法�
 
 `.github/workflows/ci.yml` は format・ESLint・全層型検査・DB不要試験・実 PG17 統合試験・Chrome 操作・Python・本番 build・`npm audit --audit-level=high`・Docker build・両 Terraform root の fmt/validate・sandbox provider mock・gitleaks のソース検査を実行します。CI の DB 資格情報は使い捨てのローカル試験用です。AWS 資格情報は渡しません。Android は JVM/接続試験をローカルで実行し、emulator CI は今回の範囲外です。Dependabot は npm / Actions / Docker / Terraform / Gradle / pip を週次確認します。
 
-push・PR 作成・main 保護設定は、ユーザーの確認後に Mac または GitHub で実施します。この VM では設定しません。最初の PR で CI が全て成功したことを確認し、GitHub の Settings → Rules → Rulesets で `main` を対象に次を設定します。
+このブランチのpushは、テストと修正で問題がないと判断した後に行う承認を受けています。PR作成・main保護設定は別途ユーザーの確認後にMacまたはGitHubで実施します。このVMからAWSへの配備は行いません。最初の PR で CI が全て成功したことを確認し、GitHub の Settings → Rules → Rulesets で `main` を対象に次を設定します。
 
 1. pull request を必須にする。別のレビュー担当がいる場合は承認1件以上を必須にする。
 2. status check を必須にし、実際の CI で表示された `Quality and unit`、`PostgreSQL and browser`、`Docker build`、`Terraform (infra)`、`Terraform (infra/sandbox)`、`Source secrets` を選ぶ。merge 前に最新 main との一致を必須にする。
@@ -132,9 +132,11 @@ CI の remote 成功・PR フロー・main 保護の完了は GitHub 側の確�
 ## 本番設定
 
 `REGI_DEV_AUTH` を削除し、`NODE_ENV=production`、Cognito issuer/client、32バイト以上の `RECOVERY_SIGNING_SECRET`、アプリ専用 `DATABASE_URL`、S3、SQS、日本国内 Bedrock 推論プロファイルを設定してください。
+`COGNITO_CLIENT_ID` は必須の Web client ID、`COGNITO_ANDROID_CLIENT_ID` は Android 専用 client ID です。API は同じ issuer の署名付き ID token に対し両方の audience を許可し、法人・担当者・MFA を検証します。Android の値が未設定または空なら Web のみを許可するため、既存 Web 配備から段階的に更新できます。sandbox は Web の refresh 1日を維持し、Android は `regipos://oauth` の public client / Authorization Code + PKCE / refresh 30日を追加します。Android 設定には `deployment.android_client_id` を使い、切替後は管理者が再ログインします。
 Terraform の `recovery_signing_secret_arn` には別途作成した署名鍵 Secret の ARN を指定します。ECS が値を注入し、鍵そのものをソースや tfvars に保存しません。
 `COGNITO_MFA_ENFORCED=true` は、Terraform のようにユーザープールの MFA が **ON** であることを運用者が検証した場合だけ使用します。JWT の署名・issuer・audience・ID token 種別・法人・staff subject は API が検証します。
 本部の Hosted UI は `VITE_COGNITO_DOMAIN` / `VITE_COGNITO_CLIENT_ID` をビルド時に指定し、Authorization Code + PKCE を利用します。
+Android の refresh 30日は初回ログインからの有効期間です。更新を続けても期限は延長されません。ローカルの時計を進める試験と期限切れ表示、Mac からの配備後の実時間同期は別々に記録します。30日経過後も無人同期できるとの判定は行いません。更新手順と外部検証は `docs/aws-sandbox.md` を参照してください。
 回収トークンは端末・認証期間に限定した署名付き資格情報です。期限内イベントの回収にだけ利用でき、新しい認証・商品取得・管理者操作には使えません。署名鍵をローテーションする場合は既存回収資格情報の期限・未送信端末を先に確認します。
 Bedrock 未接続・技術失敗は利用枠を戻し、販売・仕入・通常の集計は停止しません。
 
