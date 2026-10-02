@@ -2,7 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { bootstrapApplicationRole, scramVerifier } from '../scripts/sandbox-db-role';
@@ -153,6 +160,54 @@ test('an already-running start resets the two-hour timer through SSM with explic
   assert.ok(calls.includes('systemctl restart regi-autostop.timer'));
   assert.ok(calls.includes('--instance-ids i-00000000000000001'));
   assert.ok(!calls.includes('modify-instance-attribute'));
+});
+void test('acknowledged sandbox start succeeds on headless Linux and when the optional Mac browser fails', () => {
+  for (const platform of ['Linux', 'Darwin']) {
+    const directory = resolve('.context/control-test-' + randomUUID()),
+      config = directory + '/control.json',
+      log = directory + '/aws.log',
+      browserLog = directory + '/browser.log';
+    mkdirSync(directory, { recursive: true });
+    symlinkSync(resolve('tests/fixtures/mock-sandbox-aws.sh'), directory + '/aws');
+    writeFileSync(directory + '/uname', `#!/usr/bin/env bash\nprintf '%s\\n' '${platform}'\n`, {
+      mode: 0o755,
+    });
+    writeFileSync(
+      directory + '/open',
+      '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$MOCK_BROWSER_LOG"\nexit 3\n',
+      { mode: 0o755 },
+    );
+    writeFileSync(
+      config,
+      JSON.stringify({
+        aws_profile: 'confirmed-profile',
+        expected_account_id: '000000000001',
+        region: 'ap-northeast-1',
+        instance_id: 'i-00000000000000001',
+        web_url: 'https://test.cloudfront.net',
+      }),
+      { mode: 0o600 },
+    );
+    const result = spawnSync('bash', ['scripts/sandbox-control.sh', 'start'], {
+      env: {
+        ...process.env,
+        PATH: directory + ':' + process.env.PATH,
+        REGI_SANDBOX_CONTROL_CONFIG: config,
+        MOCK_AWS_LOG: log,
+        MOCK_AWS_ACCOUNT: '000000000001',
+        MOCK_BROWSER_LOG: browserLog,
+      },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, `${platform}: ${result.stderr}`);
+    assert.ok(result.stdout.includes('Started; auto-stop is reset to two hours.'));
+    assert.ok(result.stdout.includes('https://test.cloudfront.net'));
+    assert.ok(readFileSync(log, 'utf8').includes('ssm get-command-invocation'));
+    if (platform === 'Darwin') {
+      assert.equal(readFileSync(browserLog, 'utf8').trim(), 'https://test.cloudfront.net');
+      assert.ok(result.stderr.includes('Browser could not open; use the URL above.'));
+    } else assert.equal(existsSync(browserLog), false);
+  }
 });
 test('stop waits for stopping to become stopped, and never reports a terminated or still-stopping instance as stopped', () => {
   for (const state of ['stopping', 'stopped', 'terminated']) {

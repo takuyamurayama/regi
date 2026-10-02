@@ -57,7 +57,9 @@ case "$action" in
     done
     if [ "$connected" != true ]; then printf 'SSM unavailable; guest two-hour auto-stop remains enabled. Check host bootstrap.\n' >&2; exit 1; fi
     printf 'Started; auto-stop is reset to two hours. Private API may take several minutes to initialize.\n%s\n' "$url"
-    if command -v open >/dev/null 2>&1; then open "$url"; fi
+    if [ "$(uname -s)" = Darwin ] && command -v open >/dev/null 2>&1; then
+      open "$url" >/dev/null 2>&1 || printf 'Browser could not open; use the URL above.\n' >&2
+    fi
     ;;
   stop)
     state=$(aws_cli ec2 describe-instances --instance-ids "$instance" --query 'Reservations[0].Instances[0].State.Name' --output text)

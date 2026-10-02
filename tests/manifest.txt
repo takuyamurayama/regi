@@ -91,6 +91,7 @@ tests/sandbox-mfa.test.ts	default production requires administrator MFA even whe
 tests/sandbox-mfa.test.ts	explicit synthetic sandbox accepts signed password-only admin, preserving actor.mfa=false and real administration
 tests/sandbox-mfa.test.ts	password-only exemption is tenant-bound and requires a completed genuine synthetic marker
 tests/sandbox-mfa.test.ts	sandbox still rejects unsigned/wrong-key/expired/wrong-issuer/audience/type tokens and development headers
+tests/sandbox-tooling.test.ts	acknowledged sandbox start succeeds on headless Linux and when the optional Mac browser fails
 tests/sandbox-tooling.test.ts	an already-running start resets the two-hour timer through SSM with explicit instance/profile
 tests/sandbox-tooling.test.ts	auto-stop precedes every risky bootstrap command; existing disks and workload credentials fail closed
 tests/sandbox-tooling.test.ts	failed stop backup emits an explicit warning and still uses normal guest shutdown

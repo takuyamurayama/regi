@@ -23,6 +23,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: Build shared core for Web imports and unit tests
+        run: npm run build -w @regi/core
       - run: npx prisma generate --schema apps/api/prisma/schema.prisma
       - run: npm run format:check
       - run: npm run lint
