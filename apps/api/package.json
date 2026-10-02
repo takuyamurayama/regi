@@ -13,7 +13,7 @@
     "@aws-sdk/client-sqs": "^3.900.0",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
-    "@nestjs/platform-express": "^11.1.0",
+    "@nestjs/platform-express": "^12.1.1",
     "@nestjs/swagger": "^11.2.0",
     "@regi/core": "1.0.0",
     "express": "5.2.1",
