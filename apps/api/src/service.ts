@@ -178,7 +178,10 @@ export class Business {
   ) {
     const operationId = parse(uuid, input.operationId);
     if (storeId) this.access(actor, storeId);
-    const hash = digest({ action, input });
+    const hashedInput = Object.fromEntries(
+      Object.entries(input as Record<string, unknown>).filter(([key]) => key !== 'pin'),
+    );
+    const hash = digest({ action, input: hashedInput });
     return this.database.transaction(actor, async (transaction) => {
       const [existing] = await rows(
         transaction,
@@ -2228,6 +2231,38 @@ export class Business {
           shift.store_id === input.storeId && shift.status === 'open',
           'SHIFT_STATE',
           '開局記録を確認してください',
+        );
+        const deviceId = parse(z.object({ deviceId: uuid }), shift.body).deviceId;
+        const [device] = await rows<{
+          pending: number;
+          review_count: number;
+          last_sync: Date | null;
+        }>(
+          transaction,
+          sql`SELECT pending,review_count,last_sync FROM devices WHERE id=${deviceId}::uuid AND store_id=${shift.store_id}::uuid`,
+        );
+        requireRule(device, 'DEVICE_NOT_FOUND', '締め対象の端末がありません', 404);
+        const syncedAgo = device.last_sync
+          ? Date.now() - new Date(device.last_sync).getTime()
+          : Number.NaN;
+        requireRule(
+          device.pending === 0 && syncedAgo >= 0 && syncedAgo < 120000,
+          'SYNC_PENDING',
+          '締め対象の端末を同期し、未送信・確認待ち会計を解消してください',
+        );
+        requireRule(
+          device.review_count === 0,
+          'REVIEW_PENDING',
+          '締め対象端末の要確認・処理待ちイベントを解消してください',
+        );
+        const [unresolved] = await rows<{ id: string }>(
+          transaction,
+          sql`SELECT id FROM device_events WHERE device_id=${deviceId}::uuid AND store_id=${shift.store_id}::uuid AND status NOT IN ('accepted','dismissed') UNION ALL SELECT id FROM device_event_quarantine WHERE device_id=${deviceId}::uuid AND store_id=${shift.store_id}::uuid AND status NOT IN ('accepted','dismissed') LIMIT 1`,
+        );
+        requireRule(
+          !unresolved,
+          'REVIEW_PENDING',
+          '締め対象端末の要確認・処理待ちイベントを解消してください',
         );
         const sales = await rows(
           transaction,

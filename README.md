@@ -77,14 +77,14 @@ NODE_ENV=production npm run build
 npm run test:web
 npm run test:web:manifest
 .context/venv311/bin/python -m unittest discover -s forecast -v
-python3.11 -m unittest discover -s tests -p '*_test.py' -v
+NODE_ENV=test python3.11 -m unittest discover -s tests -p '*_test.py' -v
 NODE_ENV=test npx tsx scripts/restore-test.ts
 NODE_ENV=test REGI_LOAD_BASEURL=http://localhost:3000 npx tsx scripts/load-test.ts
 ```
 
-`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web の6ファイル（現時点18件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点86件、PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
+`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web の6ファイル（現時点18件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点94件、PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
 
-`tests/manifest.txt` は既存 Node 71件・ブラウザー20件を保持し、D0追加を含む現在の Node 104件・ブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
+`tests/manifest.txt` は既存 Node 71件・ブラウザー20件を保持し、D0追加を含む現在の Node 112件・ブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
 
 Web 操作試験は migration・seed 済みの DB と Google Chrome (`/usr/bin/google-chrome`) を前提とします。Playwright の `webServer` が API と Web を起動して終了時に停止します。ローカルでは既存のサーバーを再利用できるため、変更後は現行 build で再起動してください。CI では再利用せず、毎回起動します。
 
@@ -92,6 +92,7 @@ ESLint 9 の `recommended-type-checked` を全 TypeScript に適用し、API の
 PDF の出力・検証には Noto Sans CJK の日本語フォントと Poppler (`pdftotext`) が必要です。Amazon Linux は `sudo dnf install -y google-noto-sans-cjk-ttc-fonts poppler-utils`。フォントの配置が異なる環境では `JAPANESE_FONT` に `NotoSansCJK-Regular.ttc` のパスを指定します。Docker イメージには日本語フォントを同梱しています。
 削除試験を含む `npm test` には、ローカル限定の `MAINTENANCE_TEST_DATABASE_URL` を `.env` の `MIGRATION_DATABASE_URL` と同じ所有者接続に設定してください。通常 API には所有者接続を渡しません。
 共有する実PostgreSQLスキーマへの保守DDLと業務試験が競合しないよう、試験ファイルは順次実行します。各試験内の同時再送・同時入荷・返金の競合検証は並列のままです。
+hostのbackup/restore試験も独立した一時DBで000〜007と追加テーブルを復元します。PG17のpg_dump/pg_restoreを使用してください。CIではPython試験stepの `POSTGRES_TEST_CONTAINER` でserviceと同じPG17クライアントを選びます。実AWSは呼ばずuploadはstubです。
 復元・負荷試験はローカル専用の試験データを追加します。復元試験は `.context/restore-test.dump` と別の `regi_restore_*` DB を残します。
 負荷試験では100端末のストレスを再現するため SQL で専用端末を作成し、通常の2台/店舗の登録制限を試験 fixture に限って迂回します。
 本番 DB に試験コマンドを実行してはいけません。
@@ -154,6 +155,6 @@ Bedrock 未接続・技術失敗は利用枠を戻し、販売・仕入・通常
 
 ## 個人AWS・合成データ
 
-必要な時だけ起動する単一EC2、CloudFront標準HTTPS、Cognito認証、2時間自動停止の手順は `docs/aws-sandbox.md` を参照してください。本番のMulti-AZ構成は維持します。USD30は通知で課金上限ではなく、停止中も永続ディスク等の料金が残ります。
+必要な時だけ起動する単一EC2、CloudFront標準HTTPS、Cognito認証、2時間自動停止の手順は `docs/aws-sandbox.md` を参照してください。将来用のMulti-AZ構成はD0で変更しません。D0はBudget10 USD（ACTUAL80%/FORECASTED100%の通知）で、旧私有tfvarsの30 USDはMacから明示変更が必要です。通知は課金上限ではなく、停止中も永続ディスク等の料金が残ります。条件付き約650円/月の見積は同資料を参照してください。毎時backupと配備・復元訓練は [配備runbook](docs/runbook/deploy.md)・[復元runbook](docs/runbook/restore.md) に従います。
 `npm run db:seed:sandbox` は明示opt-in、専用法人UUIDの二重確認、実Cognito subject、非公開PINファイルを要求し、84日/2店舗/504売上の架空データを冪等投入します。開発シードの固定認証/PINをAWSで使いません。Webは `VITE_DEMO_HISTORY_END` のあるデモビルドだけ末尾7日を初期表示し、常時「実在の販売実績ではありません」と示します。通常ビルドは今日のままです。Bedrockは既定で無効、生成回答の代用品は作りません。
-個人の合成sandboxだけ `require_mfa=false` でメール/パスワードのみを選べます。既定値はtrue、本番MFAは変更しません。明示したtenant UUIDと完了した合成シードをAPIの両管理者gateで確認し、mfa=falseを偽装せず、JWT/PKCE/法人/権限の検査を維持します。**2026-10-02の親担当報告でAWS適用済み・Cognito MFA OFF・更新API/host/Webの実環境検証合格。本人の認証後ログイン操作は未検証**です。ユーザーの希望により引継ぎ時は稼働を継続し、2時間自動停止を有効にしています。入口は https://d3azs6ryeibszv.cloudfront.net 。既存環境のTerraform更新は先に同じEC2を起動してplanし、置換・削除を提案するplanは適用しません。実機・商用本番・Bedrock生成AIの完成を意味しません。
+個人の合成sandboxだけ `require_mfa=false` でメール/パスワードのみを選べます。既定値はtrue、本番MFAは変更しません。明示したtenant UUIDと完了した合成シードをAPIの両管理者gateで確認し、mfa=falseを偽装せず、JWT/PKCE/法人/権限の検査を維持します。**旧版について2026-10-02に親担当からAWS適用・Cognito MFA OFF・API/host/Web検証合格の報告がありました。今回のD0ソースを配備した結果ではありません。本人の認証後ログイン操作は未検証**です。過去の入口は https://d3azs6ryeibszv.cloudfront.net 。現在の稼働状態は今回のVMから照会していません。履歴は [実装履歴](docs/history/2026-10-02.md)、現状は [サマリー](docs/implementation-status.md) を参照してください。既存環境のTerraform更新は先に同じEC2を起動してplanし、置換・削除を提案するplanは適用しません。実機・商用本番・Bedrock生成AIの完成を意味しません。

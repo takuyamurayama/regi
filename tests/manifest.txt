@@ -70,6 +70,9 @@ tests/migration.test.ts	migration failure rolls back all statements and does not
 tests/migration.test.ts	migration runner preserves tagged dollar quotes and semicolons in complete SQL files
 tests/migration.test.ts	nontransaction header permits concurrent indexes while keeping quoted statements intact
 tests/payload-limit.test.ts	HTTP accepts one hundred sales with five lines and five thousand CSV rows; every body limit returns actionable nonretryable Japanese 413
+tests/pin-idempotency.test.ts	fresh shift opening still rejects a wrong PIN and stores a PIN-free operation hash after correct authentication
+tests/pin-idempotency.test.ts	legacy staff and redacted shift PIN hashes fail closed without rewriting history or reexecuting business actions
+tests/pin-idempotency.test.ts	staff mutation excludes only top-level PIN from idempotency hash while preserving original PIN verification and audit redaction
 tests/presentation.test.ts	payment proportions retain integer precision beyond Number.MAX_SAFE_INTEGER
 tests/presentation.test.ts	payment shares reflect actual totals, including zero and absent methods
 tests/presentation.test.ts	yen display preserves integer amounts, negative amounts and grouping
@@ -90,11 +93,13 @@ tests/sandbox-mfa.test.ts	password-only exemption is tenant-bound and requires a
 tests/sandbox-mfa.test.ts	sandbox still rejects unsigned/wrong-key/expired/wrong-issuer/audience/type tokens and development headers
 tests/sandbox-tooling.test.ts	an already-running start resets the two-hour timer through SSM with explicit instance/profile
 tests/sandbox-tooling.test.ts	auto-stop precedes every risky bootstrap command; existing disks and workload credentials fail closed
+tests/sandbox-tooling.test.ts	failed stop backup emits an explicit warning and still uses normal guest shutdown
 tests/sandbox-tooling.test.ts	power commands reject an account mismatch before starting/stopping any resource
 tests/sandbox-tooling.test.ts	production API never accepts development headers or enables a public development auth bypass
 tests/sandbox-tooling.test.ts	real PostgreSQL application role has SCRAM verifier and cannot become owner/superuser/RLS bypass
 tests/sandbox-tooling.test.ts	secrets, private pins, plans/state are excluded; source examples remain included
 tests/sandbox-tooling.test.ts	stale SSM Online is not sufficient: start retries until a command actually succeeds
+tests/sandbox-tooling.test.ts	stop observes bounded SSM backup completion before requesting normal guest shutdown
 tests/sandbox-tooling.test.ts	stop waits for stopping to become stopped, and never reports a terminated or still-stopping instance as stopped
 tests/sandbox.test.ts	both demo stores train forecasts from 84 complete days using real Python and PostgreSQL
 tests/sandbox.test.ts	existing real tenant and a Cognito subject in another tenant cannot be claimed or overwritten
@@ -102,6 +107,9 @@ tests/sandbox.test.ts	parallel reruns preserve every fact, cursor and count with
 tests/sandbox.test.ts	sandbox opt-in, subject, tenant confirmation and private PIN file are mandatory
 tests/sandbox.test.ts	seed retains RLS and immutable sales/inventory and does not expose another store
 tests/sandbox.test.ts	synthetic seed resumes after interruption and creates complete authentic business facts
+tests/shift-hardening.test.ts	HTTP online shift close rejects pending, unknown, unreported, stale, future and client review states without changing money or audit
+tests/shift-hardening.test.ts	completed online shift close replays its original result even after new pending and stale status
+tests/shift-hardening.test.ts	online shift close blocks main and quarantine nonterminal events until dismissal and counts accepted cash exactly once
 tests/sync-dismiss.test.ts	HTTP signed admin can dismiss once with required reason while other roles and tenants cannot
 tests/sync-dismiss.test.ts	Prisma single_open_shift SQLSTATE23505 maps to review without converting unrelated unique failures
 tests/sync-dismiss.test.ts	Web opening conflict becomes durable review and dismissal aliases subsequent sale cash and close to the existing opening

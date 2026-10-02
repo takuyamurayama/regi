@@ -22,7 +22,7 @@ variable "alert_email" {
 }
 variable "monthly_budget_usd" {
   type    = number
-  default = 30
+  default = 10
   validation {
     condition     = var.monthly_budget_usd > 0 && var.monthly_budget_usd <= 100
     error_message = "Sandbox alert must be explicitly within USD 1–100; this is not a spending cap."

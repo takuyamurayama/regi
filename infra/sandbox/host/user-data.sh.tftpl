@@ -57,10 +57,27 @@ printf '[Unit]\nRequiresMountsFor=/var/lib/regi\n' > /etc/systemd/system/docker.
 cat > /opt/regi/host.json <<'JSON'
 {"region":"ap-northeast-1","bucket":"${bucket}","name":"${name}","runtimePath":"${runtime_path}","secretArn":"${secret_arn}"}
 JSON
-for file in bootstrap.sh bootstrap.py credentials.py compose.yaml; do
+cat > /opt/regi/bootstrap-manifest.json <<'JSON'
+${bootstrap_checksums}
+JSON
+for file in bootstrap.sh bootstrap.py credentials.py compose.yaml backup.sh restore.sh database_backup.py install-host.sh install_host.py regi-stop.sh regi.service regi-backup.service regi-backup.timer; do
   aws s3 cp "s3://${bucket}/releases/${name}/bootstrap/$file" "/opt/regi/$file" --region ap-northeast-1 --only-show-errors
 done
-chmod 700 /opt/regi/bootstrap.sh
+python3 - <<'PY'
+import hashlib
+import json
+from pathlib import Path
+directory = Path('/opt/regi')
+expected = json.loads((directory / 'bootstrap-manifest.json').read_text())
+files = {'bootstrap.sh', 'bootstrap.py', 'credentials.py', 'compose.yaml', 'backup.sh', 'restore.sh', 'database_backup.py', 'install-host.sh', 'install_host.py', 'regi-stop.sh', 'regi.service', 'regi-backup.service', 'regi-backup.timer'}
+if set(expected) != files:
+    raise SystemExit('REGI initial host file set mismatch')
+for name in files:
+    path = directory / name
+    if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != expected[name]:
+        raise SystemExit('REGI initial host checksum mismatch')
+PY
+chmod 700 /opt/regi/bootstrap.sh /opt/regi/install-host.sh
 mkdir -p /usr/local/lib/docker/cli-plugins
 curl --fail --silent --show-error --location https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose-linux-x86_64
 curl --fail --silent --show-error --location https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-x86_64.sha256 -o /tmp/regi-compose.sha256
@@ -82,23 +99,7 @@ OnUnitActiveSec=15min
 [Install]
 WantedBy=timers.target
 UNIT
-cat > /etc/systemd/system/regi.service <<'UNIT'
-[Unit]
-Description=Private REGI sandbox containers
-Requires=docker.service
-After=docker.service network-online.target
-RequiresMountsFor=/var/lib/regi
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-WorkingDirectory=/opt/regi
-ExecStart=/opt/regi/bootstrap.sh
-ExecStop=/usr/bin/docker compose -f /opt/regi/compose.yaml stop -t 45
-TimeoutStartSec=6600
-TimeoutStopSec=90
-[Install]
-WantedBy=multi-user.target
-UNIT
+/opt/regi/install-host.sh
 systemctl daemon-reload
 systemctl enable --now docker regi-autostop.timer regi-credentials.timer
 systemctl enable regi.service

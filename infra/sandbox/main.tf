@@ -1,8 +1,13 @@
 locals {
-  az             = data.aws_availability_zones.available.names[0]
-  runtime_path   = "/${var.name}/runtime"
-  bootstrap_keys = toset(["bootstrap.sh", "bootstrap.py", "credentials.py", "compose.yaml"])
-  assume_ec2     = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }] })
+  az           = data.aws_availability_zones.available.names[0]
+  runtime_path = "/${var.name}/runtime"
+  bootstrap_keys = toset([
+    "bootstrap.sh", "bootstrap.py", "credentials.py", "compose.yaml",
+    "backup.sh", "restore.sh", "database_backup.py", "install-host.sh", "install_host.py",
+    "regi-stop.sh", "regi.service", "regi-backup.service", "regi-backup.timer"
+  ])
+  bootstrap_checksums = { for key in local.bootstrap_keys : key => filesha256("${path.module}/host/${key}") }
+  assume_ec2          = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "ec2.amazonaws.com" }, Action = "sts:AssumeRole" }] })
 }
 resource "aws_vpc" "main" {
   cidr_block           = "10.63.0.0/16"
@@ -63,6 +68,164 @@ resource "aws_s3_bucket_versioning" "private" {
   bucket = aws_s3_bucket.private.id
   versioning_configuration { status = "Enabled" }
 }
+resource "aws_s3_bucket" "backups" {
+  bucket_prefix = "${var.name}-backups-"
+  force_destroy = false
+  lifecycle { prevent_destroy = true }
+}
+resource "aws_s3_bucket" "backups_replica" {
+  provider      = aws.osaka
+  bucket_prefix = "${var.name}-backups-osaka-"
+  force_destroy = false
+  lifecycle { prevent_destroy = true }
+}
+resource "aws_s3_bucket_public_access_block" "backups" {
+  bucket                  = aws_s3_bucket.backups.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+resource "aws_s3_bucket_public_access_block" "backups_replica" {
+  provider                = aws.osaka
+  bucket                  = aws_s3_bucket.backups_replica.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+resource "aws_s3_bucket_ownership_controls" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule { object_ownership = "BucketOwnerEnforced" }
+}
+resource "aws_s3_bucket_ownership_controls" "backups_replica" {
+  provider = aws.osaka
+  bucket   = aws_s3_bucket.backups_replica.id
+  rule { object_ownership = "BucketOwnerEnforced" }
+}
+resource "aws_s3_bucket_server_side_encryption_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule {
+    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
+  }
+}
+resource "aws_s3_bucket_server_side_encryption_configuration" "backups_replica" {
+  provider = aws.osaka
+  bucket   = aws_s3_bucket.backups_replica.id
+  rule {
+    apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
+  }
+}
+resource "aws_s3_bucket_versioning" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  versioning_configuration { status = "Enabled" }
+}
+resource "aws_s3_bucket_versioning" "backups_replica" {
+  provider = aws.osaka
+  bucket   = aws_s3_bucket.backups_replica.id
+  versioning_configuration { status = "Enabled" }
+}
+resource "aws_s3_bucket_policy" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [{
+    Sid       = "DenyNonTLS", Effect = "Deny", Principal = "*", Action = "s3:*",
+    Resource  = [aws_s3_bucket.backups.arn, "${aws_s3_bucket.backups.arn}/*"],
+    Condition = { Bool = { "aws:SecureTransport" = "false", "aws:PrincipalIsAWSService" = "false" } }
+  }] })
+}
+resource "aws_s3_bucket_policy" "backups_replica" {
+  provider = aws.osaka
+  bucket   = aws_s3_bucket.backups_replica.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [{
+    Sid       = "DenyNonTLS", Effect = "Deny", Principal = "*", Action = "s3:*",
+    Resource  = [aws_s3_bucket.backups_replica.arn, "${aws_s3_bucket.backups_replica.arn}/*"],
+    Condition = { Bool = { "aws:SecureTransport" = "false", "aws:PrincipalIsAWSService" = "false" } }
+  }] })
+}
+resource "aws_s3_bucket_lifecycle_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  rule {
+    id     = "expire-postgres-backups"
+    status = "Enabled"
+    filter { prefix = "pg/" }
+    expiration { days = 35 }
+    noncurrent_version_expiration { noncurrent_days = 35 }
+  }
+  rule {
+    id     = "abort-incomplete-postgres-uploads"
+    status = "Enabled"
+    filter { prefix = "pg/" }
+    abort_incomplete_multipart_upload { days_after_initiation = 1 }
+  }
+  rule {
+    id     = "remove-expired-postgres-delete-markers"
+    status = "Enabled"
+    filter { prefix = "pg/" }
+    expiration { expired_object_delete_marker = true }
+  }
+  depends_on = [aws_s3_bucket_versioning.backups]
+}
+resource "aws_s3_bucket_lifecycle_configuration" "backups_replica" {
+  provider = aws.osaka
+  bucket   = aws_s3_bucket.backups_replica.id
+  rule {
+    id     = "expire-postgres-backups"
+    status = "Enabled"
+    filter { prefix = "pg/" }
+    expiration { days = 35 }
+    noncurrent_version_expiration { noncurrent_days = 35 }
+  }
+  rule {
+    id     = "abort-incomplete-postgres-uploads"
+    status = "Enabled"
+    filter { prefix = "pg/" }
+    abort_incomplete_multipart_upload { days_after_initiation = 1 }
+  }
+  rule {
+    id     = "remove-expired-postgres-delete-markers"
+    status = "Enabled"
+    filter { prefix = "pg/" }
+    expiration { expired_object_delete_marker = true }
+  }
+  depends_on = [aws_s3_bucket_versioning.backups_replica]
+}
+resource "aws_iam_role" "backup_replication" {
+  name_prefix = "${var.name}-backup-replication-"
+  assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
+    Effect = "Allow", Principal = { Service = "s3.amazonaws.com" }, Action = "sts:AssumeRole"
+  }] })
+}
+resource "aws_iam_role_policy" "backup_replication" {
+  role = aws_iam_role.backup_replication.id
+  policy = jsonencode({ Version = "2012-10-17", Statement = [
+    { Sid = "ReadSourceReplication", Effect = "Allow", Action = ["s3:GetReplicationConfiguration", "s3:ListBucket"], Resource = aws_s3_bucket.backups.arn },
+    { Sid = "ReadPostgresVersions", Effect = "Allow", Action = ["s3:GetObjectVersionForReplication", "s3:GetObjectVersionAcl"], Resource = "${aws_s3_bucket.backups.arn}/pg/*" },
+    { Sid = "ReplicatePostgresVersions", Effect = "Allow", Action = ["s3:ReplicateObject"], Resource = "${aws_s3_bucket.backups_replica.arn}/pg/*" }
+  ] })
+}
+resource "aws_s3_bucket_replication_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+  role   = aws_iam_role.backup_replication.arn
+  rule {
+    id       = "postgres-to-osaka"
+    status   = "Enabled"
+    priority = 1
+    filter { prefix = "pg/" }
+    delete_marker_replication { status = "Disabled" }
+    destination {
+      bucket        = aws_s3_bucket.backups_replica.arn
+      storage_class = "STANDARD"
+    }
+  }
+  depends_on = [
+    aws_s3_bucket_versioning.backups, aws_s3_bucket_versioning.backups_replica,
+    aws_s3_bucket_public_access_block.backups, aws_s3_bucket_public_access_block.backups_replica,
+    aws_s3_bucket_ownership_controls.backups, aws_s3_bucket_ownership_controls.backups_replica,
+    aws_s3_bucket_server_side_encryption_configuration.backups, aws_s3_bucket_server_side_encryption_configuration.backups_replica,
+    aws_s3_bucket_policy.backups, aws_s3_bucket_policy.backups_replica,
+    aws_iam_role_policy.backup_replication
+  ]
+}
 resource "aws_s3_object" "bootstrap" {
   for_each     = local.bootstrap_keys
   bucket       = var.bootstrap_bucket
@@ -89,6 +252,7 @@ resource "aws_iam_role_policy" "host" {
   role = aws_iam_role.host.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["s3:GetObject"], Resource = "arn:aws:s3:::${var.bootstrap_bucket}/releases/*" },
+    { Sid = "WritePostgresBackups", Effect = "Allow", Action = ["s3:PutObject"], Resource = "${aws_s3_bucket.backups.arn}/pg/*" },
     { Effect = "Deny", Action = ["s3:*"], Resource = "arn:aws:s3:::${var.bootstrap_bucket}/state/*" },
     { Effect = "Allow", Action = ["ssm:GetParameter"], Resource = "arn:aws:ssm:ap-northeast-1:${var.expected_account_id}:parameter${local.runtime_path}" },
     { Effect = "Allow", Action = ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"], Resource = aws_secretsmanager_secret.runtime.arn },
@@ -133,7 +297,7 @@ resource "aws_instance" "host" {
     http_tokens                 = "required"
     http_put_response_hop_limit = 1
   }
-  user_data  = templatefile("${path.module}/host/user-data.sh.tftpl", { bucket = var.bootstrap_bucket, runtime_path = local.runtime_path, secret_arn = aws_secretsmanager_secret.runtime.arn, name = var.name, volume_id = aws_ebs_volume.data.id })
+  user_data  = templatefile("${path.module}/host/user-data.sh.tftpl", { bucket = var.bootstrap_bucket, runtime_path = local.runtime_path, secret_arn = aws_secretsmanager_secret.runtime.arn, name = var.name, volume_id = aws_ebs_volume.data.id, bootstrap_checksums = jsonencode(local.bootstrap_checksums) })
   depends_on = [aws_route_table_association.host, aws_iam_role_policy.host, aws_s3_object.bootstrap]
   tags       = { Name = var.name }
 }
@@ -231,8 +395,10 @@ resource "aws_s3_bucket_policy" "web" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Principal = { Service = "cloudfront.amazonaws.com" }, Action = "s3:GetObject", Resource = "${aws_s3_bucket.web.arn}/*", Condition = { StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.web.arn } } }] })
 }
 resource "aws_cognito_user_pool" "staff" {
-  name              = var.name
-  mfa_configuration = var.require_mfa ? "ON" : "OFF"
+  name                = var.name
+  deletion_protection = "ACTIVE"
+  mfa_configuration   = var.require_mfa ? "ON" : "OFF"
+  lifecycle { prevent_destroy = true }
   dynamic "software_token_mfa_configuration" {
     for_each = var.require_mfa ? [true] : []
     content {
@@ -309,10 +475,12 @@ resource "aws_ssm_parameter" "runtime" {
   name = local.runtime_path
   type = "String"
   value = jsonencode({
-    name      = var.name, issuer = "https://cognito-idp.ap-northeast-1.amazonaws.com/${aws_cognito_user_pool.staff.id}", clientId = aws_cognito_user_pool_client.web.id, androidClientId = aws_cognito_user_pool_client.android.id,
-    webOrigin = "https://${aws_cloudfront_distribution.web.domain_name}", workloadRoleArn = aws_iam_role.workload.arn, bucket = aws_s3_bucket.private.id,
-    queueUrl  = aws_sqs_queue.exports.url, releaseBucket = var.bootstrap_bucket, imageObjectKey = var.image_object_key, imageSha256 = var.image_sha256, image = "regi:sandbox", demo = var.demo, bedrockProfileArn = var.bedrock_profile_arn, requireMfa = var.require_mfa
+    name         = var.name, issuer = "https://cognito-idp.ap-northeast-1.amazonaws.com/${aws_cognito_user_pool.staff.id}", clientId = aws_cognito_user_pool_client.web.id, androidClientId = aws_cognito_user_pool_client.android.id,
+    webOrigin    = "https://${aws_cloudfront_distribution.web.domain_name}", workloadRoleArn = aws_iam_role.workload.arn, bucket = aws_s3_bucket.private.id,
+    queueUrl     = aws_sqs_queue.exports.url, releaseBucket = var.bootstrap_bucket, imageObjectKey = var.image_object_key, imageSha256 = var.image_sha256, image = "regi:sandbox", demo = var.demo, bedrockProfileArn = var.bedrock_profile_arn, requireMfa = var.require_mfa,
+    backupBucket = aws_s3_bucket.backups.id, backupRegion = "ap-northeast-1", backupReplicaBucket = aws_s3_bucket.backups_replica.id, backupReplicaRegion = "ap-northeast-3", bootstrapSha256 = local.bootstrap_checksums
   })
+  depends_on = [aws_s3_bucket_replication_configuration.backups, aws_s3_bucket_lifecycle_configuration.backups, aws_s3_bucket_lifecycle_configuration.backups_replica]
 }
 resource "aws_budgets_budget" "monthly" {
   name         = "${var.name}-account-monthly-alert"
@@ -322,9 +490,16 @@ resource "aws_budgets_budget" "monthly" {
   time_unit    = "MONTHLY"
   notification {
     comparison_operator        = "GREATER_THAN"
-    threshold                  = 100
+    threshold                  = 80
     threshold_type             = "PERCENTAGE"
     notification_type          = "ACTUAL"
+    subscriber_email_addresses = [var.alert_email]
+  }
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 100
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
     subscriber_email_addresses = [var.alert_email]
   }
 }

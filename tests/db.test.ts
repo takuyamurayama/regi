@@ -428,6 +428,12 @@ test('real PostgreSQL transactional acceptance', async (context) => {
     async () => {
       const report = await business.report(actor, store);
       assert.equal(report.approximateGrossProfit, '125');
+      await business.deviceStatus(actor, device, {
+        ...op(),
+        pending: 0,
+        reviewCount: 0,
+        stopped: true,
+      });
       const closed = await business.closeShift(actor, shift.id, { ...op(), actual: '10000' });
       assert.equal(closed.body.expected, '10000');
       assert.equal(closed.body.difference, '0');

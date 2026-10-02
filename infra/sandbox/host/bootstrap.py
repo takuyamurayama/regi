@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import time
@@ -77,9 +78,21 @@ def cognito_environment(runtime):
     return environment
 
 
+def backup_configuration(runtime):
+    bucket = runtime.get("backupBucket", "")
+    if not isinstance(bucket, str) or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
+        raise ValueError("An explicit backup bucket is required")
+    if runtime.get("backupRegion") != "ap-northeast-1" or runtime.get("backupReplicaRegion") != "ap-northeast-3":
+        raise ValueError("Backup regions do not match the approved sandbox")
+    return {"backend": "compose", "database": "regi", "user": "regi_owner",
+            "hostDirectory": "/opt/regi", "privateDirectory": "/var/lib/regi/private/backups",
+            "backupBucket": bucket, "backupRegion": runtime["backupRegion"]}
+
+
 def bootstrap(config, runtime):
     authentication = authentication_environment(runtime)
     cognito = cognito_environment(runtime)
+    backup_config = backup_configuration(runtime)
     stage("runtime-secret")
     directory = Path("/var/lib/regi/private")
     directory.mkdir(parents=True, exist_ok=True)
@@ -144,6 +157,13 @@ def bootstrap(config, runtime):
             compose("run", "--rm", "maintenance", "/opt/forecast/bin/python", "forecast/regi_forecast.py", "--tenant", demo["tenant_id"], "--store", str(uuid.UUID(bytes=bytes(digest))))
     stage("api-worker-start")
     compose("up", "-d", "api", "worker")
+    private_file("/opt/regi/backup.json", json.dumps(backup_config, sort_keys=True))
+    stage("backup-timer")
+    subprocess.run(["systemctl", "start", "regi-backup.timer"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    stage("startup-backup")
+    result = subprocess.run(["/opt/regi/backup.sh", "--reason", "startup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if result.returncode:
+        print("REGI startup backup failed; inspect protected last-backup.json; hourly timer remains enabled", flush=True)
     stage("ready")
 
 

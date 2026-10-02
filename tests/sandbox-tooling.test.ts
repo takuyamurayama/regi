@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PrismaClient } from '@prisma/client';
@@ -264,6 +264,19 @@ test('auto-stop precedes every risky bootstrap command; existing disks and workl
   assert.ok(!api.includes('maintenance.env'));
   assert.ok(!api.includes('/run/regi-private'));
   assert.ok(!compose.includes('5432:5432'));
+  assert.ok(
+    userData.indexOf('REGI initial host checksum mismatch') <
+      userData.indexOf('/opt/regi/install-host.sh\n'),
+  );
+  const stop = readFileSync('infra/sandbox/host/regi-stop.sh', 'utf8'),
+    service = readFileSync('infra/sandbox/host/regi.service', 'utf8'),
+    timer = readFileSync('infra/sandbox/host/regi-backup.timer', 'utf8');
+  assert.ok(stop.indexOf('backup.sh --reason stop') < stop.indexOf('compose.yaml stop -t 45'));
+  assert.ok(stop.includes('continuing bounded shutdown'));
+  assert.ok(service.includes('ExecStop=/opt/regi/regi-stop.sh'));
+  assert.ok(service.includes('TimeoutStopSec=360'));
+  assert.ok(timer.includes('OnCalendar=*-*-* *:00:00 UTC'));
+  assert.ok(timer.includes('Persistent=true'));
   execFileSync('bash', ['-n', 'scripts/sandbox-control.sh', 'infra/sandbox/host/bootstrap.sh']);
   execFileSync('python3', [
     '-m',
@@ -271,6 +284,83 @@ test('auto-stop precedes every risky bootstrap command; existing disks and workl
     'infra/sandbox/host/bootstrap.py',
     'infra/sandbox/host/credentials.py',
   ]);
+});
+void test('stop observes bounded SSM backup completion before requesting normal guest shutdown', () => {
+  const directory = resolve('.context/control-test-' + randomUUID()),
+    config = directory + '/control.json',
+    log = directory + '/aws.log';
+  mkdirSync(directory, { recursive: true });
+  symlinkSync(resolve('tests/fixtures/mock-sandbox-aws.sh'), directory + '/aws');
+  writeFileSync(
+    config,
+    JSON.stringify({
+      aws_profile: 'confirmed-profile',
+      expected_account_id: '000000000001',
+      region: 'ap-northeast-1',
+      instance_id: 'i-00000000000000001',
+      web_url: 'https://test.cloudfront.net',
+    }),
+    { mode: 0o600 },
+  );
+  const output = execFileSync('bash', ['scripts/sandbox-control.sh', 'stop'], {
+    env: {
+      ...process.env,
+      PATH: directory + ':' + process.env.PATH,
+      REGI_SANDBOX_CONTROL_CONFIG: config,
+      MOCK_AWS_LOG: log,
+      MOCK_AWS_ACCOUNT: '000000000001',
+      MOCK_SSM_PENDING_POLLS: '2',
+    },
+    encoding: 'utf8',
+  });
+  const calls = readFileSync(log, 'utf8');
+  assert.ok(output.includes('Stopped.'));
+  const parameters = JSON.parse(calls.match(/--parameters (\{.*\}) --query/)?.[1] ?? '{}') as {
+    executionTimeout: string[];
+    commands: string[];
+  };
+  assert.deepEqual(parameters.executionTimeout, ['420']);
+  assert.ok(parameters.commands.some((command) => command.includes('last-backup.json')));
+  assert.ok(parameters.commands.some((command) => command.includes('r.get("reason")=="stop"')));
+  assert.equal(calls.split('ssm get-command-invocation').length - 1, 3);
+  assert.ok(calls.lastIndexOf('ssm get-command-invocation') < calls.indexOf('ec2 stop-instances'));
+  assert.ok(!calls.includes('ssm wait command-executed'));
+  assert.ok(!calls.includes('--force'));
+});
+void test('failed stop backup emits an explicit warning and still uses normal guest shutdown', () => {
+  const directory = resolve('.context/control-test-' + randomUUID()),
+    config = directory + '/control.json',
+    log = directory + '/aws.log';
+  mkdirSync(directory, { recursive: true });
+  symlinkSync(resolve('tests/fixtures/mock-sandbox-aws.sh'), directory + '/aws');
+  writeFileSync(
+    config,
+    JSON.stringify({
+      aws_profile: 'confirmed-profile',
+      expected_account_id: '000000000001',
+      region: 'ap-northeast-1',
+      instance_id: 'i-00000000000000001',
+      web_url: 'https://test.cloudfront.net',
+    }),
+    { mode: 0o600 },
+  );
+  const result = spawnSync('bash', ['scripts/sandbox-control.sh', 'stop'], {
+    env: {
+      ...process.env,
+      PATH: directory + ':' + process.env.PATH,
+      REGI_SANDBOX_CONTROL_CONFIG: config,
+      MOCK_AWS_LOG: log,
+      MOCK_AWS_ACCOUNT: '000000000001',
+      MOCK_SSM_FINAL_STATUS: 'Failed',
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  assert.ok(result.stdout.includes('Stopped.'));
+  assert.ok(result.stderr.includes('SSM shutdown or stop backup incomplete'));
+  const calls = readFileSync(log, 'utf8');
+  assert.ok(calls.includes('ec2 stop-instances'));
+  assert.ok(!calls.includes('--force'));
 });
 test('secrets, private pins, plans/state are excluded; source examples remain included', () => {
   const paths = [

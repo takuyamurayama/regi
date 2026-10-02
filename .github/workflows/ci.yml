@@ -99,6 +99,8 @@ jobs:
       - run: npm run test:integration
       - run: .context/venv311/bin/python -m unittest discover -s forecast -v
       - run: python -m unittest discover -s tests -p '*_test.py' -v
+        env:
+          POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
       - run: NODE_ENV=production npm run build
       - name: Browser tests (API and Web start through Playwright)
         run: npm run test:web

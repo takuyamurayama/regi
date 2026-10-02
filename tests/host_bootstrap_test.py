@@ -1,3 +1,4 @@
+import json
 import stat
 import sys
 import tempfile
@@ -93,6 +94,16 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(bootstrap.cognito_environment(runtime)["COGNITO_ANDROID_CLIENT_ID"], "")
         with self.assertRaises(ValueError):
             bootstrap.cognito_environment({**runtime, "androidClientId": None})
+
+    def test_backup_runtime_is_explicit_and_never_exports_database_credentials(self):
+        runtime = {"backupBucket": "synthetic-backups", "backupRegion": "ap-northeast-1", "backupReplicaRegion": "ap-northeast-3"}
+        result = bootstrap.backup_configuration(runtime)
+        self.assertEqual(result["database"], "regi")
+        self.assertEqual(result["user"], "regi_owner")
+        self.assertNotIn("password", json.dumps(result).lower())
+        for invalid in ({}, {**runtime, "backupBucket": "../private"}, {**runtime, "backupRegion": "ap-northeast-3"}):
+            with self.assertRaises(ValueError):
+                bootstrap.backup_configuration(invalid)
 
 
 if __name__ == "__main__":

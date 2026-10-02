@@ -2,9 +2,9 @@
 
 この環境は**架空データだけを扱う個人検証用**です。単一EC2のため、本番仕様のMulti-AZ、99.9%、RPO 5分/RTO 4時間、35日PITRを満たす構成ではありません。`infra/` の本番設定は変更せず、別の `infra/sandbox/` を使用します。実決済・顧客データ・実店舗運用には使用しないでください。
 
-**最新の確認（2026-10-02 UTC）：親担当が個人用のパスワードのみ認証をAWSへ適用し、実Cognito MFA OFF、更新API/host/Web、権限・データ保持の受入検証に合格しました。** 同じEC2とデータディスクを保持し、最終Terraform planは変更なし。本人の認証後ログイン・画面操作は未検証です。Cognito利用者はCONFIRMEDで、今回パスワードの再設定や招待は行っていません。実装担当はAWS/Macを操作せず、資格情報も受け取っていません。
+**D0変更のAWS受入は未実施です。** このVMにはAWS資格情報がなく、Android client、バックアップ／大阪複製、Cognito削除保護、Budget10 USDの実apply・S3到達・復元訓練はMacの運営者が実施します。ローカル試験と実AWS受入を [現状サマリー](implementation-status.md) と [配備手順](runbook/deploy.md) で区別してください。
 
-**ユーザーの明示希望により、引継ぎ時は稼働を継続します。停止済みではありません。** 2時間自動停止は有効で、親担当が引継ぎ時にタイマーを再設定する運用です。入口は https://d3azs6ryeibszv.cloudfront.net 。過去の02:50 UTC停止記録は旧配備の履歴で、今回の最終状態ではありません。実検証の詳細と証拠は `docs/implementation-status.md` の末尾を参照してください。
+D0着手前の配備記録（2026-10-02 UTC）では、親担当が個人用のパスワードのみ認証を適用し、Cognito MFA OFF、更新API/host/Web、権限・データ保持を確認しています。当時は同じEC2とデータディスクを保持し、ユーザー希望により2時間自動停止を有効にしたまま稼働継続で引き継ぎました。本人のHosted UIログイン・画面操作は未検証です。入口は https://d3azs6ryeibszv.cloudfront.net 。これは過去配備の記録で、現在の稼働状態やD0配備済みを意味しません。Mac launcherで状態を確認してください。
 
 ## 構成と費用
 
@@ -12,17 +12,38 @@
 - CloudFront標準ドメインのHTTPS、Webは非公開S3/OAC、APIはVPC originでEC2の**プライベートDNS**へ接続。EC2 ingressはCloudFrontのサービス管理SGから3000だけ。SSH・DB・公開IPへのAPIアクセスは許可しません。公開IPv4は外向き通信専用で、Elastic IPは使用しません。
 - CognitoのHosted UI、Authorization Code + PKCE、メール/パスワード。管理者MFA/TOTPは既定で必須。明示指定した架空データの個人sandboxだけMFAなしを選べます。顧客が変更できる属性に法人IDを含めません。開発ヘッダー認証・固定パスワード・公開デモログインは使用しません。
 - 最初のuser-data処理で**2時間後の自動停止タイマー**を有効化。`shutdown` はterminateではなくstop。正常起動前に失敗しても停止タイマーは残ります。起動操作を繰り返すと、その時点から2時間へ延長します。
-- USD30の通知は**AWSアカウント全体の予算アラートで、課金の上限ではありません**。停止中もEBS、S3、Secrets Managerなどの保管費用は残ります。稼働時間、通信、ログ、AI、税により総額は変わります。常時稼働を前提としません。
+- 稼働中の毎時・起動直後・停止直前にPostgreSQLのdumpと同一snapshotのmanifestを東京の専用S3へ保存し、大阪へ非同期複製します。両バケットは非公開・SSE-S3・versioning・TLS必須。current35日＋noncurrent35日の独立ライフサイクルで、未完multipartを1日後に回収します。停止中は最後の成功backupが復元点です。
+- Terraformでは永続ディスク・両backupバケット・Cognito poolを `prevent_destroy` で保護し、poolの `deletion_protection="ACTIVE"` を設定します。pool／bucketの通常更新で保護を解除しません。
+- Budgetは既定**10 USD、ACTUAL80%／FORECASTED100%のAWSアカウント全体の通知**で、課金上限や自動停止ではありません。停止中も保管費用が残り、稼働時間、通信、ログ、AI、為替、税により総額が変わります。旧私有tfvarsの `monthly_budget_usd=30` はMacで `10` に変更してからapplyしてください。
 
 CloudFront VPC originにはIGWと利用可能なIPv4が必要です。東京の物理AZ `apne1-az3` は対象外なので、AZ名ではなくzone IDで除外します。公開HTTP originへのフォールバックは設けません。[AWS公式のVPC origin制約](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html)
 
+### 費用の条件（2026-10-02確認、税別、1 USD＝150円の例）
+
+| 対象                                 | 公式単価と仮定                                      | 概算             |
+| ------------------------------------ | --------------------------------------------------- | ---------------- |
+| 東京gp3 40GiB（OS8＋data32）         | 0.096 USD/GiB-month                                 | 576円/月         |
+| Secrets Manager 1 secret             | 0.40 USD/secret-month、APIは別                      | 60円/月          |
+| 東京／大阪S3 Standard                | 各0.025 USD/GiB-month、両地域の全versions合計を計上 | 保管量による     |
+| 東京→大阪の通常複製転送              | 0.09 USD/GiB                                        | 新規複製量による |
+| 両地域S3 Tier1 requests              | 各0.0047 USD/1,000回、multipart追加回数を含む       | request数による  |
+| 起動中のt3a.small Linux＋public IPv4 | 0.0245＋0.005 USD/h                                 | 約4.425円/h      |
+
+固定の停止中保管基礎は **636円/月**。全S3保管量を `S` GiB-month、当月の大阪向け複製量を `D` GiB、両地域のTier1 request合計を `N` とすると、追加概算は `150×(0.025×S＋0.09×D＋0.0047×N/1000)` 円です。web/artifacts/bootstrap/state、dump/manifestのcurrent／noncurrent版を全て含め、GET、その他API、通信、無料枠超過は別に確認します。
+
+例えば `S=1、D=1、N=400` なら約653.53円/月で、**停止中約650円は少量backup・上記為替の条件付き概算**です。実測請求額や上限を示しません。単純に10%税を加える例では約719円。停止でcompute課金は止まりますがEBSは残り、自動割当public IPv4は解放されます。Elastic IPは保持しません。[AWS stop/start仕様](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/how-ec2-instance-stop-start-works.html)、[VPC料金](https://aws.amazon.com/vpc/pricing/)。
+
+35＋35日の設定では固有hour keyも約70日残り得ます。毎時100MiBの圧縮dumpを70日保管した例では両地域合計約328GiBとなり、S3 storageだけ約1,230円/月、複製転送料等はさらに加算されます。起動・停止時の上書き版、manifest、他bucketも計上します。Budget通知を受けたらMacから両地域の保持量・複製量・account全体の請求を確認します。
+
+地域単価は公式Price Listの [東京EC2/EBS](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/ap-northeast-1/index.csv)、[東京S3](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/ap-northeast-1/index.csv)、[大阪S3](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/ap-northeast-3/index.csv)、[東京Data Transfer](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/current/ap-northeast-1/index.csv)で確認しました。料金区分・税の扱いは [EBS](https://aws.amazon.com/ebs/pricing/)、[S3](https://aws.amazon.com/s3/pricing/)、[Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/) の公式料金を参照してください。
+
 ## 事前準備・アカウント確認
 
-AWS操作は、承認済みプロフィールを持つMac側だけで行います。資格情報ファイルを読んだり、クラウド開発VMへ転送したりしません。Node 22以上でWebをビルドできる別環境と、Terraform 1.10以上、AWS CLI v2、Python 3、Docker amd64ビルド環境が必要です。MacのDockerが使えなければ、開発VMでイメージを作り、Mac発行の短時間・単一キー用presigned PUTでアップロードできます。URLも資格情報相当なのでログへ出さず、期限後に破棄します。
+AWS操作は、承認済みプロフィールを持つMac側だけで行います。資格情報ファイルを読んだり、クラウド開発VMへ転送したりしません。Node 22以上でWebをビルドできる別環境と、Terraform 1.10以上、AWS CLI v2、Python 3、Docker amd64ビルド環境が必要です。MacのDockerが使えなければ、開発VMでローカルbuild／検証したarchiveをMacへ移し、S3へのuploadはMacだけから実施します。VMへAWS資格情報やpresigned URLを渡しません。
 
 1. Macで `aws --profile <承認済みprofile> --region ap-northeast-1 sts get-caller-identity` のAccountを確認します。`expected_account_id` と異なる場合は停止します。
 2. 別管理のbootstrap S3バケットを用意します。非公開、Block Public Access、暗号化、バージョン管理、TLS必須。Terraform stateとreleaseを分け、EC2には `releases/*` の読み取りだけを許可し、`state/*` は明示拒否します。スタックは既存バケットを作成・削除しません。
-3. `.private/` に0600の `sandbox.tfvars` と `sandbox.backend.hcl` を保存します。`infra/sandbox/sandbox.tfvars.example` をコピーし、アカウント・通知メール・既存バケットを確認済みの値へ変更。初回は `image_sha256=""`、demo無効、Bedrock無効のままにします。
+3. `.private/` に0600の `sandbox.tfvars` と `sandbox.backend.hcl` を保存します。`infra/sandbox/sandbox.tfvars.example` をコピーし、アカウント・通知メール・既存バケットを確認済みの値へ変更。既存の `monthly_budget_usd=30` 指定は `10` に直します。初回は `image_sha256=""`、demo無効、Bedrock無効のままにします。大阪providerも同じ `expected_account_id` に制限されます。
 
 backend設定例（秘密の資格情報は入れない）:
 
@@ -36,7 +57,7 @@ encrypt      = true
 
 Macの承認済みprofileを指定し、planを**私有ファイル**へ保存します。state/plan/実tfvars/backendはソース配布へ含めません。プランが検証環境外の資源を変更しないことを確認してから、承認したplanだけをapplyします。
 
-**既存stackの更新は、先にMac launcherで既存EC2を起動してからplanします。** 停止中はproviderが公開IPの関連付けをfalseと読む場合があり、`associate_public_ip_address=false→true` を理由にhost置換を提案することがあります。その破壊的planをapplyしないでください。既存instanceを起動・正常性確認後にplanを作り直し、意図しないcreate/destroyがないことを確認します。今回の親検証では起動後の更新planは0 add/3 update/0 destroy、適用後の最終planはexit 0・変更なしでした。instance/dataの破棄や保護解除で回避しません。通常は作業後にlauncherで正常停止しますが、今回はユーザーが試用のため稼働継続を明示したので、2時間自動停止を有効にしたまま引き継ぎます。
+**既存stackの更新は、先にMac launcherで既存EC2を起動してからplanします。** 停止中はproviderが公開IPの関連付けをfalseと読む場合があり、`associate_public_ip_address=false→true` を理由にhost置換を提案することがあります。その破壊的planをapplyしないでください。既存instanceを起動・正常性確認後にplanを作り直し、意図しないcreate/destroyがないことを確認します。D0着手前の旧配備では、起動後の更新planが0 add/3 update/0 destroy、適用後に変更なしだった記録があります。今回のD0 planはMacで未取得です。instance/dataの破棄や保護解除で回避せず、作業後の起動／停止状態と2時間タイマーを受入表へ記録します。
 
 ```bash
 umask 077
@@ -48,7 +69,7 @@ terraform -chdir=infra/sandbox apply /absolute/path/.private/sandbox.tfplan
 terraform -chdir=infra/sandbox output -json deployment > /absolute/path/.private/deployment.json
 ```
 
-初回CloudFront作成には時間がかかります。EC2にはまだ検証済みイメージもDBの初期化承認もなく、アプリは実行されません。これは安全な待機状態です。user-dataの変更は既存インスタンスで自動再実行されないため、レビューした修正版を非公開S3経由・SSMで再実行してください。設定の再applyだけで修復済みと判断しないでください。
+初回CloudFront作成には時間がかかります。EC2にはまだ検証済みイメージもDBの初期化承認もなく、アプリは実行されません。これは安全な待機状態です。既存EC2は `user_data_replace_on_change=false` のためapplyだけでhostが更新されません。[配備手順](runbook/deploy.md)に従い、Macで既知SHAとruntimeを照合したinstaller2ファイルから `install-host.sh --refresh` を実行し、限定したhostファイル・unitsを更新して `systemctl restart regi` します。通常更新でuser-data全体やディスク初期化を再実行しません。
 
 ## データディスクの一回限り初期化承認
 
@@ -69,7 +90,7 @@ terraform -chdir=infra/sandbox output -json deployment > /absolute/path/.private
 ```bash
 docker build --platform linux/amd64 -t regi:sandbox .
 docker save regi:sandbox | gzip > /private/path/regi-app.tar.gz
-sha256sum /private/path/regi-app.tar.gz
+shasum -a 256 /private/path/regi-app.tar.gz
 ```
 
 Macから確認済みbootstrapバケットの `releases/<sandbox名>/app-<版>.tar.gz` へアップロードし、そのキーとSHA-256を私有tfvarsへ設定します。S3上のアーカイブが正しいことを確認してからapplyし、SSMで `regi.service` を再起動します。ハッシュ不一致ではdocker load・アプリ実行をしません。SHA計算は4MBずつのストリーム処理で、2GBメモリへ全アーカイブを読みません。
@@ -99,7 +120,7 @@ runtime/outputのrequireMfaは同じ値にし、hostは次だけをアプリへ�
 
 Authの管理者ログインとAdministrationの管理操作は同じ判定を使用します。MFAなしを許可するのは、このUUIDと一致し、RLSで取得した `demo-seed` がcompletedかつ `synthetic=true` / `version=regi-synthetic-v1` の法人管理者だけです。別法人・実法人・未完了シード・非管理者は許可しません。`actor.mfa=false` はそのまま保持します。JWT署名/issuer/audience/期限/ID token/法人/staff/PINによる権限縮小、PKCE/state/refreshの検査は無効化しません。
 
-**更新手順と今回の適用結果:** 更新APIイメージとSHA、修正版host/bootstrap.py、Cognito対応Webを準備した後、Macの承認済み環境でCognito OFF/runtimeの変更planを確認して適用します。旧APIはMFAなしの管理者を拒否するため、Cognitoだけ先にOFFにして完了扱いにしないでください。hostはアプリ/workerのMFA値もfalseで起動し、既存デモ履歴を再投入しません。今回は親担当がこれらを実適用し、runtime.requireMfa=false、更新API image、bootstrapのstage ready、Web配布とCloudFront invalidation完了を確認しました。合成法人管理者のmfa=falseで共有判定が通り、非管理者/別法人/不正token/dev headersは拒否されました。本人のHosted UIログイン・管理画面操作は別途必要です。初回パスワード変更はCognitoが要求する場合に本人が行いますが、今回の利用者はCONFIRMEDで再設定・再招待はしていません。実装担当は追加のAWS接続/資格情報を取得して自動実行しません。
+**旧配備の適用結果（D0着手前）:** 更新APIイメージとSHA、修正版host/bootstrap.py、Cognito対応Webを準備した後、Macの承認済み環境でCognito OFF/runtimeの変更planを確認して適用した記録があります。旧APIはMFAなしの管理者を拒否するため、Cognitoだけ先にOFFにして完了扱いにしないでください。hostはアプリ/workerのMFA値もfalseで起動し、既存デモ履歴を再投入しません。この旧配備で親担当はruntime.requireMfa=false、更新API image、bootstrapのstage ready、Web配布とCloudFront invalidation完了を確認しました。合成法人管理者のmfa=falseで共有判定が通り、非管理者/別法人/不正token/dev headersは拒否されています。本人のHosted UIログイン・管理画面操作は別途必要です。初回パスワード変更はCognitoが要求する場合に本人が行いますが、旧配備の利用者はCONFIRMEDで再設定・再招待はしていません。これはD0変更の配備済みを意味せず、実装担当は追加のAWS接続/資格情報を取得して自動実行しません。
 
 AdminGetUserの**実際の `sub`** をdemoのadministrator_subjectに使用します。Cognito subはGUIDの形でもRFC UUIDのversion/variantを満たさない場合があるため、外部subjectは16進の8-4-4-4-12形式で検証します。法人IDは引き続きUUID検証を行います。
 
@@ -141,20 +162,10 @@ deployment の `client_id` は Web、`android_client_id` は Android です。SS
 
 この変更は VM で fmt/validate/provider mock と署名付き JWT/実 PG 試験まで検証します。以下の更新は AWS 資格情報のある **Mac の運営者**が実施し、結果を記録してください。
 
-1. 更新イメージをビルドし、前述の手順で非公開 release key と `image_sha256` を私有 tfvars に設定します。既存 EC2 を起動して plan し、Android client の追加・runtime/release/host ファイル更新だけを確認します。既存 user pool/Web client/EC2/永続ディスクの置換・削除を提案する plan は適用しません。
-2. 確認した plan を apply し、`terraform output -json deployment` を私有 `deployment.json` へ更新します。Terraform の更新だけでは既存 EC2 の `/opt/regi/bootstrap.py` が更新されません。
-3. Mac の SSM Run Command で対象 instance 上の更新済み bootstrap を取得し、サービスを再起動します。bootstrap bucket と sandbox 名は確認済み deployment と tfvars に合わせます。`SendCommand` の instance/profile/account を確認し、以下を SSM の root コマンドとして渡します。
-
-   ```bash
-   set -euo pipefail
-   aws s3 cp s3://<bootstrap_bucket>/releases/<sandbox名>/bootstrap/bootstrap.py /opt/regi/bootstrap.py --region ap-northeast-1 --only-show-errors
-   chmod 600 /opt/regi/bootstrap.py
-   systemctl restart regi
-   systemctl is-active regi
-   ```
-
-4. `bootstrap-stage.json` の `ready`、HTTPS `/health`、既存 Web ログインを確認します。Android の設定へ deployment の `cognito_domain` と **`android_client_id`** を入力し、管理者が PKCE で再ログインします。旧 Web client の refresh token を Android client へ流用しません。設定切替でも Room の会計・未送信記録は保持します。
-5. Android audience の API 同期・lease 更新と、別 audience/不正署名の拒否を確認します。確認結果には日時・client 種別・成功/失敗・pending/review 件数を残し、JWT/refresh token/PIN を含めません。
+1. [配備手順](runbook/deploy.md)で更新イメージ／SHA、私有tfvars、Android client・backup・Budgetを含むplanをレビューしapplyします。既存 user pool/Web client/EC2/永続ディスクの置換・削除を提案するplanは適用しません。
+2. deploymentを更新し、既存hostにinstallerが無ければ `install-host.sh` と `install_host.py` の両方を既知SHAで確認して配置します。runtimeの `bootstrapSha256` は13ファイルの限定集合です。`install-host.sh --refresh` による全ファイル検証・units更新後、SSMで `systemctl restart regi` します。裸のbootstrap.pyだけのcopyで完了扱いにしません。
+3. `bootstrap-stage.json` の `ready`、HTTPS `/health`、既存Webログインを確認します。Android設定へdeploymentの `cognito_domain` と **`android_client_id`** を入力し、管理者がPKCEで再ログインします。旧Web clientのrefresh tokenをAndroid clientへ流用せず、会計・未送信記録を保持します。
+4. Android audienceのAPI同期・lease更新と、別audience／不正署名の拒否を確認します。日時・client種別・成功/失敗・pending/review件数を記録し、JWT/refresh token/PINを含めません。
 
 refresh token は **初回ログインから30日で失効**し、更新や rotation でも初回の期限は延長されません。[AWS の refresh token 仕様](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-refresh-token.html)に従い、30日の有効期間内の無人更新と、期限切れ `invalid_grant` で tokens を破棄し「管理者の再ログインが必要」を常時表示することを別々に検証します。D0-4 の「30日以上」を30日経過後も継続できる保証として完了扱いにはしません。
 
@@ -197,13 +208,23 @@ Macでは `scripts/sandbox-start.command` / `sandbox-stop.command` / `sandbox-st
 
 ## 保管・復旧・撤去
 
-停止は削除ではありません。単一ディスク故障や誤削除に対する自動バックアップはこの安価構成では設定しません。必要なら本人の追加費用承認の上、停止/DB整合を確認したEBS snapshotや暗号化したpg_dumpを私有領域へ保管し、別環境で復元を試験します。本番のRPO/RTO達成とは区別します。
+停止は削除ではありません。D0では `backup.sh` と `regi-backup.timer` を追加し、稼働中毎時・起動直後・停止直前に `pg_dump -Fc` →gzip→東京S3の `pg/YYYY/MM/DD/HH.dump.gz` と対応manifestをSSE-S3で保存します。dumpとmanifestの件数・migration版／checksum・RLSは同じexported snapshotから取得し、version ID・SHA・snapshotを照合して復元pairを決めます。同hourの上書き版もversioningで保管します。停止前backupが失敗しても2時間自動停止を続行し、失敗を受入記録へ残します。
 
-data volumeはTerraformの `prevent_destroy` で保護しています。削除時はデータを必要な形式で取り出し、本人の明示承認・snapshot要否・料金を確認した上で保護解除してplanを再レビューします。CloudFront/VPC origin、EC2、S3のversion、秘密情報、SQS、予算通知を含め残資源を確認してください。別管理のbootstrapバケットとstateは `terraform destroy` では消えません。stateやreleaseの残留も別途確認します。承認なしに自動cleanupやディスク消去を行いません。
+東京と大阪は同じ確認済みaccount内の専用バケットで、`pg/` のlive replicationのみを設定します。delete marker複製は無効、source既存物の自動backfillは行いません。replication roleはsource設定／対象version読取とdestinationの `s3:ReplicateObject` に限定し、hostの新規権限は東京 `pg/*` の **`s3:PutObject` だけ**です。アプリroleにbackup権限、hostにGet/List/Delete／大阪writeを付与しません。タグはbackupに使用せず複製tag読取も追加しません。[AWSの複製権限](https://docs.aws.amazon.com/AmazonS3/latest/userguide/setting-repl-config-perm-overview.html)。
+
+両bucketのTLS Denyは通常の `Bool` で `aws:SecureTransport=false` **かつ** `aws:PrincipalIsAWSService=false` とし、人／IAM roleのHTTPを拒否します。AWS間requestでnetwork contextが欠落する場合の扱いは [公式TLS policy](https://docs.aws.amazon.com/AmazonS3/latest/userguide/amazon-s3-policy-keys.html#example-bucket-policies-tls) に従います。`BoolIfExists` により欠落したTLS contextを拒否しません。service例外は追加Allowではなく、非公開設定と最小replication権限を維持します。
+
+current expiration35日＋noncurrent expiration35日は、全versionsを作成後35日以内に物理削除する保証ではありません。通常の固有hour keyも約70日保管され得て、replication Pending/Failedはさらに長く残る場合があります。lifecycleは非同期で、両regionへ独立に設定します。未完multipartは1日後に回収し、全object版が無いexpired delete markerは別ruleで除去します。[S3 versioned expiration](https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-expire-general-considerations.html)。
+
+毎時成功中のRPO目標は1時間ですが、停止中・backup障害中は最後の成功点、大阪は複製到着まで復元可能ではありません。[復元手順](runbook/restore.md)でMacの運営者がversion固定したdump／manifestを取得・私有転送し、別の空DBへ復元して全public件数・migration checksum・role／ACL・FORCE RLS／policyを検証してから切り替えます。月1回の訓練で実測RPO／RTOを記録し、実AWSでの初回訓練は未実施です。本構成はMulti-AZやPITRの代替ではありません。
+
+data volume・両backup bucket・Cognito poolはTerraformの `prevent_destroy` で保護し、CognitoはAWS側deletion protectionもACTIVEです。S3 Object Lockやoperatorの全version削除禁止を意味しません。撤去時は必要データ・復元pairを取り出し、本人の明示承認・保管期限・料金を確認してから保護解除planを再レビューします。両regionの全versions／delete markers／未完uploads、CloudFront/VPC origin、EC2、秘密情報、SQS、予算通知を含め残資源を確認してください。別管理bootstrap bucketとstateは `terraform destroy` では消えません。承認なしに自動cleanupやディスク消去を行いません。
 
 ## ローカルで再実行した試験
 
 `README.md` のローカルDB/Python環境を先に準備してください。シード試験はローカル管理接続で独立した一時DBを作成し、アプリ用role・全migration・実RLSで検査して最後に一時DBを削除します。本番URLを拒否します。AWS操作コマンドの試験はstub、Terraform試験はprovider mockで、実配備の代わりではありません。
+
+2026-10-02のD0ローカル検証ではNode112件・Web20件・Python27件・sandbox Terraform mock10件が合格しました。SHA13ファイルはruntimeと初回user-dataの両方で現host sourceと照合し、両Terraform rootのfmt／validateも成功しています。リモートGitHub CI、実AWSの毎時backup／大阪複製／復元訓練・Budget通知・Cognito実時間同期は未受入です。最終結果と外部受入の記録は [現状サマリー](implementation-status.md) を参照してください。
 
 ```bash
 set -a; source .env; set +a
