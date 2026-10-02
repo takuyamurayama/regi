@@ -18,7 +18,7 @@
     "@regi/core": "1.0.0",
     "express": "5.2.1",
     "jose": "^6.1.0",
-    "pdfkit": "^0.17.2",
+    "pdfkit": "^0.20.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.0",
     "zod": "^4.1.0"
