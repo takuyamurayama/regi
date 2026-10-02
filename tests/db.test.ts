@@ -173,6 +173,37 @@ test('real PostgreSQL transactional acceptance', async (context) => {
         ),
       /immutable/,
     );
+    const accepted = await db.transaction(actor, (transaction) =>
+      rows<{ status: string; hash: string; body: unknown; result: unknown }>(
+        transaction,
+        sql`SELECT status,hash,body,result FROM device_events WHERE id=${event.id}::uuid`,
+      ),
+    );
+    assert.equal(accepted[0].status, 'accepted');
+    assert.deepEqual(accepted[0].body, event);
+    // Resolve the deliberately rejected fixture before independent stocktake scenarios.
+    const dismissReason = '受領済み売上と照合し、試験で意図的に改変したイベントを棄却';
+    const dismissed = await db.transaction(actor, async (transaction) => {
+      await transaction.$executeRaw(
+        sql`UPDATE device_event_quarantine SET status='dismissed',dismissed_by=${staff}::uuid,dismiss_reason=${dismissReason} WHERE id=${event.id}::uuid AND status='review'`,
+      );
+      return rows<{ status: string; dismissed_by: string; dismiss_reason: string }>(
+        transaction,
+        sql`SELECT status,dismissed_by,dismiss_reason FROM device_event_quarantine WHERE id=${event.id}::uuid`,
+      );
+    });
+    assert.deepEqual(dismissed, [
+      { status: 'dismissed', dismissed_by: staff, dismiss_reason: dismissReason },
+    ]);
+    assert.deepEqual(
+      await db.transaction(actor, (transaction) =>
+        rows<{ status: string; hash: string; body: unknown; result: unknown }>(
+          transaction,
+          sql`SELECT status,hash,body,result FROM device_events WHERE id=${event.id}::uuid`,
+        ),
+      ),
+      accepted,
+    );
   });
   await context.test(
     'reorder fallback uses configured base stock and order unit rounding',

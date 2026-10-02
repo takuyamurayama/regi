@@ -478,3 +478,13 @@ Bedrock生成AIは無効で、実LightGBM予測98行は保持。本番のMFA/Mul
 CI、Dependabot、Playwright webServer、Node版指定、公式Gradle8.11.1 wrapper、digest固定multi-stage Docker（production依存、Python独立stage、非root、healthcheck）を追加。保守migration/seedの実行経路を保持した。
 
 ローカルでNode71件（Node22でも分離18/53）、Android JVM3件・接続8件、forecast Python5件、host Python6件、Docker build/API healthy/保守import、日本語PDFを含む統合試験、両Terraform fmt/validate・sandbox mock6件、npm audit0件とCI構文検査を確認した。ブラウザー20件のwebServer起動回帰も合格し、端末強制停止後の別プロセス再開・二重売上なしを確認した。AWSへの適用・配備は今回実施しない。main保護・PRフローはGitHubでの確認待ち。ユーザーが追加承認したpushはD0の検証・修正後に実施する。
+
+## D0 第2週の同期・migration修正（2026-10-02・ローカル検証）
+
+PrismaのDB障害を要確認へ誤分類していた同期処理を修正した。未知障害は固定の日本語案内付きretryとなり、そのバッチの後続も業務処理を止める。保存できたretryはwaiting、連番衝突はquarantineへ原イベントを保存する。保存自体の失敗はSYNC_STORE_FAILEDとして端末に再送を求め、保存に失敗したreviewを返さない。waitingは日締め・棚卸完了を阻止し、既存の理由付き棚卸review照合は保持した。
+
+同期4MB・商品CSV5MB・その他256KBの経路別JSON上限を設定し、超過はPAYLOAD_TOO_LARGE、retryable:false、nextAction「分割して再送」とした。修正前の失敗と修正後の成功を、Prisma例外注入、別接続で31秒超保持したadvisory lockによる実P2028、保存失敗後の売上・在庫・監査のrollback、HTTPの100件×5明細と5,000行CSVで確認した。端末向け応答はaccepted/review/retryを保持する。
+
+pg8のsimple queryによるファイル単位migration、非transactionヘッダーのSQL分割、SHA-256台帳・改変時起動拒否、SCRAMの000_roles、007の5状態・quarantine/FORCE RLS・active subject部分一意制約を追加した。既存001〜006は変更せず、旧版番号のみの台帳は説明付きでchecksumを一度採用する。適用済み000があってもアプリロールの危険な権限変更を起動時に拒否する。空DBの000〜007・checksum・権限・RLSを実PGで検査した。quarantineを既存retentionの削除順にも追加した。
+
+第2週の最終回帰はNode93/93、ブラウザー20/20、manifest113一致、skip0。Dockerの本番設定health200・healthy、保守import・空DBmigration・Python5/5、型・lint・整形・audit0・秘密scan0、両Terraform validateとsandbox mock6/6を確認した。意図的な衝突を作る既存試験は、元acceptedのbody/hash/resultが不変であることを検査し、試験内で隔離イベントへ理由・承認者付きdismissedを記録してから、従来の棚卸・契約期限の期待値を検査する。実AWS障害注入・実時間受入は未実施。

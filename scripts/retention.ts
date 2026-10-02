@@ -2,6 +2,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { S3Client, ListObjectVersionsCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { pathToFileURL } from 'node:url';
 const tables = [
+  'device_event_quarantine',
   'device_events',
   'device_leases',
   'inventory',

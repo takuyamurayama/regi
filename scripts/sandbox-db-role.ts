@@ -2,6 +2,15 @@ import { PrismaClient } from '@prisma/client';
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 
+interface ApplicationRole {
+  rolsuper: boolean;
+  rolbypassrls: boolean;
+  rolcreatedb: boolean;
+  rolcreaterole: boolean;
+  rolreplication: boolean;
+  rolcanlogin: boolean;
+}
+
 export function scramVerifier(password: string, salt = randomBytes(16)) {
   const iterations = 4096,
     salted = pbkdf2Sync(password, salt, iterations, 32, 'sha256');
@@ -17,12 +26,17 @@ export async function bootstrapApplicationRole(
 ) {
   if (!/^regi_[a-z0-9_]{1,55}$/.test(roleName) || password.length < 32 || password.length > 200)
     throw new Error('SANDBOX_DB_ROLE_INPUT');
-  const existing = await owner.$queryRawUnsafe<any[]>(
-    'SELECT rolsuper,rolbypassrls,rolcreatedb,rolcreaterole,rolreplication FROM pg_roles WHERE rolname=$1',
+  const existing = await owner.$queryRawUnsafe<ApplicationRole[]>(
+    'SELECT rolsuper,rolbypassrls,rolcreatedb,rolcreaterole,rolreplication,rolcanlogin FROM pg_roles WHERE rolname=$1',
     roleName,
   );
   if (existing.length) {
-    if (Object.values(existing[0]).some(Boolean))
+    if (
+      !existing[0].rolcanlogin ||
+      (
+        ['rolsuper', 'rolbypassrls', 'rolcreatedb', 'rolcreaterole', 'rolreplication'] as const
+      ).some((flag) => Boolean(existing[0][flag]))
+    )
       throw new Error('SANDBOX_EXISTING_DB_ROLE_UNSAFE');
     return { created: false };
   }

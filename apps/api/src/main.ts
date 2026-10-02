@@ -14,18 +14,22 @@ import { Imports } from './import';
 import { Recommendations } from './recommendations';
 import { enrich } from './openapi';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { json as jsonParser } from 'express';
 @Module({
   controllers: [Api],
   providers: [Database, Business, Auth, Ai, Artifacts, Administration, Imports, Recommendations],
 })
 class App {}
-async function main() {
+export async function createApp(options: { writeOpenapi?: boolean } = {}) {
   if (
     process.env.REGI_DEV_AUTH === 'true' &&
     !['development', 'test'].includes(process.env.NODE_ENV ?? '')
   )
     throw new Error('Development auth cannot run in production');
-  const app = await NestFactory.create(App);
+  const app = await NestFactory.create(App, { bodyParser: false });
+  app.use('/v1/sync/events', jsonParser({ limit: '4mb' }));
+  app.use('/v1/products/import', jsonParser({ limit: '5mb' }));
+  app.use(jsonParser({ limit: '256kb' }));
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173' });
   app.useGlobalGuards(app.get(Auth));
   app.useGlobalFilters(new Errors());
@@ -42,12 +46,19 @@ async function main() {
     ),
   );
   SwaggerModule.setup('openapi', app, document);
-  mkdirSync('docs', { recursive: true });
-  writeFileSync('docs/openapi.json', json(document));
+  if (options.writeOpenapi !== false) {
+    mkdirSync('docs', { recursive: true });
+    writeFileSync('docs/openapi.json', json(document));
+  }
   app.enableShutdownHooks();
+  return app;
+}
+async function main() {
+  const app = await createApp();
   await app.listen(Number(process.env.PORT ?? 3000), '0.0.0.0');
 }
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (require.main === module)
+  void main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });

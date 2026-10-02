@@ -9,6 +9,7 @@ if ! sudo -u postgres /usr/bin/pg_ctl -D "$PGDATA" status >/dev/null 2>&1; then
  sudo -u postgres /usr/bin/pg_ctl -D "$PGDATA" -l "$PGDATA/server.log" -o '-h 127.0.0.1 -k /tmp' start
 fi
 psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+SET password_encryption = 'scram-sha-256';
 DO $$ BEGIN
  IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='regi_owner') THEN CREATE ROLE regi_owner LOGIN PASSWORD 'local-owner-only' NOSUPERUSER NOBYPASSRLS; END IF;
  IF NOT EXISTS(SELECT FROM pg_roles WHERE rolname='regi_app') THEN CREATE ROLE regi_app LOGIN PASSWORD 'local-regi-only' NOSUPERUSER NOBYPASSRLS; END IF;

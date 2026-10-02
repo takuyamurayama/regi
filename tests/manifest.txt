@@ -57,6 +57,15 @@ tests/db.test.ts	reserved quantities and unknown refunds remain locked
 tests/db.test.ts	stocktake requires stopped synchronized devices and writes only deltas
 tests/db.test.ts	transfer excludes in-transit stock until receiving
 tests/forecast-db.test.ts	real PostgreSQL forecast reads only complete days, persists seven days and rejects another store
+tests/migration.test.ts	000 role bootstrap requires a verifier, creates safe SCRAM login and rejects an unsafe existing role
+tests/migration.test.ts	empty database applies 000 through 007 with matching checksums and safe SCRAM app role
+tests/migration.test.ts	legacy version-only migration metadata adopts approved checksums without replaying facts
+tests/migration.test.ts	migration 007 permits waiting and dismissed, retains quarantine RLS and active subject uniqueness
+tests/migration.test.ts	migration SHA-256 is exact, rerun is idempotent and tampered files refuse startup
+tests/migration.test.ts	migration failure rolls back all statements and does not record an applied version
+tests/migration.test.ts	migration runner preserves tagged dollar quotes and semicolons in complete SQL files
+tests/migration.test.ts	nontransaction header permits concurrent indexes while keeping quoted statements intact
+tests/payload-limit.test.ts	HTTP accepts one hundred sales with five lines and five thousand CSV rows; every body limit returns actionable nonretryable Japanese 413
 tests/presentation.test.ts	payment proportions retain integer precision beyond Number.MAX_SAFE_INTEGER
 tests/presentation.test.ts	payment shares reflect actual totals, including zero and absent methods
 tests/presentation.test.ts	yen display preserves integer amounts, negative amounts and grouping
@@ -89,3 +98,16 @@ tests/sandbox.test.ts	parallel reruns preserve every fact, cursor and count with
 tests/sandbox.test.ts	sandbox opt-in, subject, tenant confirmation and private PIN file are mandatory
 tests/sandbox.test.ts	seed retains RLS and immutable sales/inventory and does not expose another store
 tests/sandbox.test.ts	synthetic seed resumes after interruption and creates complete authentic business facts
+tests/sync-failure.test.ts	real PostgreSQL accepted insert failure rolls back every monetary effect before durable waiting and one replay
+tests/sync-failure.test.ts	real PostgreSQL advisory lock held longer than thirty seconds induces P2028 without reviewing or losing sales
+tests/sync-failure.test.ts	real PostgreSQL batch cutoff keeps existing quarantined reviews retryable and unchanged
+tests/sync-failure.test.ts	real PostgreSQL dependency and sequence conflicts are durable and protect accepted original content
+tests/sync-failure.test.ts	real PostgreSQL recovery credentials cannot persist events from another device and malformed envelopes never return unstored review
+tests/sync-failure.test.ts	real PostgreSQL review store failure returns SYNC_STORE_FAILED and preserves the remaining batch
+tests/sync-failure.test.ts	real PostgreSQL transient failures persist waiting, stop subsequent sales and accept after replay once
+tests/sync-failure.test.ts	real PostgreSQL waiting event cannot be acknowledged into a completed stocktake
+tests/sync-failure.test.ts	real PostgreSQL waiting state blocks dayClose when stored in device_event_quarantine
+tests/sync-failure.test.ts	real PostgreSQL waiting state blocks dayClose when stored in device_events
+tests/sync-failure.test.ts	real PostgreSQL waiting state blocks stocktake when stored in device_event_quarantine
+tests/sync-failure.test.ts	real PostgreSQL waiting state blocks stocktake when stored in device_events
+tests/sync-failure.test.ts	temporary database failures always keep the whole batch retryable without private messages

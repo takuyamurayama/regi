@@ -34,6 +34,12 @@ npm run dev:api
 `.env.example` の資格情報、シード法人・担当者・PIN はローカル検証専用です。外部公開するサーバーで使用しないでください。
 `REGI_DEV_AUTH=true` は `NODE_ENV=development/test` 以外では起動時に拒否します。
 
+`db:migrate` は pg 8 の simple query で各 SQL ファイル全体を実行し、通常はファイル単位のトランザクションにします。先頭行が `-- regi:transaction=false` のファイルだけ文単位で実行でき、`CREATE INDEX CONCURRENTLY` に対応します。このモードでは途中失敗の前に完了した文が残るため、非トランザクションの SQL は再開手順も準備してください。
+
+000〜007 の SHA-256 を `regi_migrations.checksum` に記録し、適用済みファイルの改変・欠落は未適用 SQL の実行前に拒否します。旧版の version のみの台帳は、承認済み001〜006の SQL が変更されていないことを確認した上で、初回だけ checksum を追加して採用します。取引や適用済み SQL は再実行しません。変更は新しい migration へ追加し、エラーを避けるために checksum を上書きしないでください。アプリロールは台帳を参照できますが更新できません。
+
+`000_roles` は `regi_app` の LOGIN と非特権設定を検査し、未作成なら SCRAM verifier で作成します。未作成ロールを作る初回だけ CREATE ROLE が可能な管理接続と `DATABASE_URL` のアプリパスワードが必要です。通常の migration には既存 `regi_owner` を使い、API には `regi_app` だけを渡します。ローカルでは `scripts/local-db.sh`、Docker では初期化 SQL、sandbox では既存の秘密ファイルによる role bootstrap が先にロールを用意します。この VM では AWS apply・配備を行いません。
+
 Docker では `docker compose up --build db migrate api worker`。シードは `docker compose run --rm api npm run db:seed`。
 ホストの PostgreSQL と 5432 番ポートが競合する場合は、ホスト DB を停止するか Compose のポートを変更してください。
 本部 Web はホストから `npm run dev:web` で起動します。Compose のローカルワーカーは API コンテナーとは別ファイル領域を使用するため、ローカル帳票は API の非同期実行からダウンロードします。本番は共有 S3 を使用します。
@@ -67,7 +73,6 @@ npm run typecheck
 npm run test:manifest
 NODE_ENV=test npm run test:unit
 NODE_ENV=test npm run test:integration
-NODE_ENV=test npm test
 NODE_ENV=production npm run build
 npm run test:web
 npm run test:web:manifest
@@ -79,7 +84,7 @@ NODE_ENV=test REGI_LOAD_BASEURL=http://localhost:3000 npx tsx scripts/load-test.
 
 `test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web の6ファイル（現時点18件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点53件、PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
 
-`tests/manifest.txt` は Node 71件とブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
+`tests/manifest.txt` は既存 Node 71件・ブラウザー20件を保持し、D0追加を含む現在の Node 93件・ブラウザー20件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全20件の実行確認である `test:web:manifest` は使用しません。
 
 Web 操作試験は migration・seed 済みの DB と Google Chrome (`/usr/bin/google-chrome`) を前提とします。Playwright の `webServer` が API と Web を起動して終了時に停止します。ローカルでは既存のサーバーを再利用できるため、変更後は現行 build で再起動してください。CI では再利用せず、毎回起動します。
 
