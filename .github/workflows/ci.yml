@@ -33,7 +33,7 @@ jobs:
           NODE_ENV: test
       - run: npm audit --audit-level=high
       - run: NODE_ENV=production npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: quality-results
@@ -105,7 +105,7 @@ jobs:
       - name: Browser tests (API and Web start through Playwright)
         run: npm run test:web
       - run: npm run test:web:manifest
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: integration-results
