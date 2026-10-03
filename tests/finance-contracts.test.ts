@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import {
+  ApiErrorDtoSchema,
   AuthenticatedActorSchema,
   CalendarDateSchema,
   FinanceInstantSchema,
@@ -45,6 +46,31 @@ const draft = {
   lines: [],
   note: '',
 };
+void test('shared API error contract accepts optional Japanese field guidance while preserving legacy errors', () => {
+  const legacy = {
+    code: 'INVALID_INPUT',
+    message: '入力内容を確認してください。',
+    field: null,
+    retryable: false,
+    nextAction: '入力を修正してください。',
+  };
+  assert.deepEqual(ApiErrorDtoSchema.parse(legacy), legacy);
+  const guided = {
+    ...legacy,
+    field: 'shiftId',
+    fieldErrors: [{ field: 'shiftId', message: '開局記録を選択してください。' }],
+  };
+  assert.deepEqual(ApiErrorDtoSchema.parse(guided), guided);
+  assert.equal(
+    ApiErrorDtoSchema.safeParse({ ...guided, fieldErrors: [{ field: 'reason', message: 123 }] })
+      .success,
+    false,
+  );
+  assert.equal(
+    ApiErrorDtoSchema.safeParse({ ...legacy, schemaInternals: 'unknown' }).success,
+    false,
+  );
+});
 void test('finance money contracts reject JSON numbers negatives decimal notation and overlong inputs without losing big integers', () => {
   const huge = '999999999999999999999999999999';
   assert.equal(MoneyYenSchema.parse(huge), huge);

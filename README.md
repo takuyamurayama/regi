@@ -86,9 +86,9 @@ NODE_ENV=test npx tsx scripts/restore-test.ts
 NODE_ENV=test REGI_LOAD_BASEURL=http://localhost:3000 npx tsx scripts/load-test.ts
 ```
 
-`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web と仕入金融・画面状態・URLの12ファイル（現時点47件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点132件、実PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
+`test:unit` は DB 不要の core / ai-plan / presentation / report-period / api-response / auth-web と仕入金融・画面状態・URLの12ファイル（現時点50件）。`test:integration` は残りのファイルを実 PostgreSQL で順次実行します（現時点135件、実PDFとsandboxツール試験も含む）。`npm test` は両方をまとめて実行する互換コマンドです。通常の確認では分離実行か一括実行のどちらかを選べます。
 
-`tests/manifest.txt` は既存 Node 71件・ブラウザー20件とD0追加を保持し、現在の Node 179件・ブラウザー48件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全48件の実行確認である `test:web:manifest` は使用しません。
+`tests/manifest.txt` は既存 Node 71件・ブラウザー20件とD0追加を保持し、現在の Node 185件・ブラウザー51件の名前・ファイル一覧です。`test:manifest` は TypeScript AST から複数行・ネストした試験と JSON fixture の名前を含む一覧を作り直して比較し、各 Node ランナーと `test:web:manifest` は実行結果とも比較します。削除・skip・TODO・失敗は合格にできません。新規試験の追加時は一覧の変更をレビューし、`npm run test:manifest:update` で明示更新してください。ブラウザーの一部だけを実行した時は、全51件の実行確認である `test:web:manifest` は使用しません。
 
 Web 操作試験は migration・seed 済みの DB と Google Chrome (`/usr/bin/google-chrome`) を前提とします。Playwright の `webServer` が API と Web を起動して終了時に停止します。ローカルでは既存のサーバーを再利用できるため、変更後は現行 build で再起動してください。CI では再利用せず、毎回起動します。
 

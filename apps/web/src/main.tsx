@@ -108,6 +108,11 @@ function App() {
     [reviews, setReviews] = useState<any[]>([]);
   const [from, setFromValue] = useState(route.from),
     [to, setToValue] = useState(route.to);
+  const cashValid = /^(0|[1-9][0-9]{0,29})$/.test(cash);
+  const hasOpenShifts = shifts.some((entry: { status: string }) => entry.status === 'open');
+  const shiftSelectionValid = shifts.some(
+    (entry: { id: string; status: string }) => entry.id === shiftId && entry.status === 'open',
+  );
   const [recoveryVersion, setRecoveryVersion] = useState(0);
   const [exportsOpen, setExportsOpen] = useState(false),
     [exportPollingError, setExportPollingError] = useState(''),
@@ -1225,21 +1230,35 @@ function App() {
             <>
               <section>
                 <h3>端末開局 / 現金 / 店舗日締め</h3>
-                <div className="row">
-                  <input
-                    aria-label="担当者PIN"
-                    type="password"
-                    placeholder="担当者PIN"
-                    value={pin}
-                    onChange={(event) => setPin(event.target.value)}
-                  />
-                  <input
-                    aria-label="現金額"
-                    value={cash}
-                    onChange={(event) => setCash(event.target.value)}
-                  />
+                <div className="row shift-actions">
+                  <label>
+                    担当者PIN
+                    <input
+                      aria-label="担当者PIN"
+                      type="password"
+                      placeholder="担当者PIN"
+                      value={pin}
+                      onChange={(event) => setPin(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    現金額（円）
+                    <input
+                      aria-label="現金額"
+                      value={cash}
+                      onChange={(event) => setCash(event.target.value)}
+                      inputMode="numeric"
+                      aria-invalid={!cashValid}
+                      aria-describedby={!cashValid ? 'shift-cash-help' : undefined}
+                    />
+                    {!cashValid && (
+                      <small id="shift-cash-help" className="field-error">
+                        現金額は0以上の整数で入力してください（最大30桁、先頭の0は不要）。
+                      </small>
+                    )}
+                  </label>
                   <button
-                    disabled={busy}
+                    disabled={busy || !cashValid || !pin.trim()}
                     onClick={() =>
                       action(async () => {
                         const result = await post('/v1/shifts', {
@@ -1260,39 +1279,59 @@ function App() {
                   >
                     開局
                   </button>
-                  <select
-                    aria-label="開局記録"
-                    value={shiftId}
-                    onChange={(event) => setShiftId(event.target.value)}
-                  >
-                    <option value="">開局記録を選択</option>
-                    {shifts
-                      .filter((entry) => entry.status === 'open')
-                      .map((entry) => (
-                        <option key={entry.id} value={entry.id}>
-                          {
-                            settings?.devices.find(
-                              (device: any) => device.id === entry.body.deviceId,
-                            )?.name
-                          }{' '}
-                          / {new Date(entry.created_at).toLocaleString('ja-JP')}
-                        </option>
-                      ))}
-                  </select>
-                  <input
-                    placeholder="現金移動理由"
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                  />
+                  <label>
+                    開局記録
+                    <select
+                      aria-label="開局記録"
+                      value={shiftId}
+                      onChange={(event) => setShiftId(event.target.value)}
+                      aria-describedby={!shiftSelectionValid ? 'shift-selection-help' : undefined}
+                    >
+                      <option value="">開局記録を選択</option>
+                      {shifts
+                        .filter((entry) => entry.status === 'open')
+                        .map((entry) => (
+                          <option key={entry.id} value={entry.id}>
+                            {
+                              settings?.devices.find(
+                                (device: any) => device.id === entry.body.deviceId,
+                              )?.name
+                            }{' '}
+                            / {new Date(entry.created_at).toLocaleString('ja-JP')}
+                          </option>
+                        ))}
+                    </select>
+                    {!shiftSelectionValid && (
+                      <small id="shift-selection-help">
+                        {hasOpenShifts
+                          ? '現金の入出金・端末暫定締めには、開局記録を選択してください。'
+                          : '営業中の開局記録がありません。先に開局してください。'}
+                      </small>
+                    )}
+                  </label>
+                  <label>
+                    現金移動理由
+                    <input
+                      aria-label="現金移動理由"
+                      placeholder="現金移動理由"
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      aria-invalid={reason.length > 0 && !reason.trim()}
+                      aria-describedby={!reason.trim() ? 'shift-reason-help' : undefined}
+                    />
+                    {!reason.trim() && (
+                      <small id="shift-reason-help">現金入出金の理由を入力してください。</small>
+                    )}
+                  </label>
                   <button
-                    disabled={busy}
+                    disabled={busy || !shiftSelectionValid || !cashValid || !reason.trim()}
                     onClick={() =>
                       action(() =>
                         post('/v1/cash-movements', {
                           shiftId,
                           amount: cash,
                           direction: 'in',
-                          reason,
+                          reason: reason.trim(),
                         }),
                       )
                     }
@@ -1300,14 +1339,14 @@ function App() {
                     現金入金
                   </button>
                   <button
-                    disabled={busy || !shiftId}
+                    disabled={busy || !shiftSelectionValid || !cashValid || !reason.trim()}
                     onClick={() =>
                       action(() =>
                         post('/v1/cash-movements', {
                           shiftId,
                           amount: cash,
                           direction: 'out',
-                          reason,
+                          reason: reason.trim(),
                         }),
                       )
                     }
@@ -1315,7 +1354,7 @@ function App() {
                     現金出金
                   </button>
                   <button
-                    disabled={busy}
+                    disabled={busy || !shiftSelectionValid || !cashValid}
                     onClick={() =>
                       action(() => post(`/v1/shifts/${shiftId}/close`, { actual: cash }))
                     }
@@ -1334,8 +1373,15 @@ function App() {
                 <Table
                   headers={['端末', '状態', '準備金', '実査額', '差額']}
                   rows={shifts.map((entry) => [
-                    entry.body.deviceId,
-                    entry.status,
+                    settings?.devices.find(
+                      (device: { id: string; name: string }) => device.id === entry.body.deviceId,
+                    )?.name ?? '端末情報を確認してください',
+                    (
+                      { open: '開局中', provisional: '暫定締め済み', closed: '締め済み' } as Record<
+                        string,
+                        string
+                      >
+                    )[String(entry.status)] ?? '状態を確認してください',
                     yen(entry.body.opening),
                     entry.body.actual ?? '—',
                     entry.body.difference ?? '—',
@@ -1350,11 +1396,26 @@ function App() {
                 <span className="tag">STRATEGY NOTES · 集計の根拠</span>
                 <h3>集計を根拠に照会</h3>
                 <div className="row">
-                  <select value={metric} onChange={(event) => setMetric(event.target.value)}>
-                    {['sales', 'payments', 'profit', 'inventory', 'orders'].map((entry) => (
-                      <option key={entry}>{entry}</option>
-                    ))}
-                  </select>
+                  <label>
+                    照会対象
+                    <select
+                      aria-label="照会する集計"
+                      value={metric}
+                      onChange={(event) => setMetric(event.target.value)}
+                    >
+                      {[
+                        ['sales', '売上'],
+                        ['payments', '支払方法別売上'],
+                        ['profit', '概算粗利'],
+                        ['inventory', '在庫'],
+                        ['orders', '発注'],
+                      ].map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <input
                     aria-label="AI質問"
                     value={question}

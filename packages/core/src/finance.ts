@@ -87,6 +87,10 @@ export const ApiErrorDtoSchema = z.strictObject({
   field: z.string().nullable(),
   retryable: z.boolean(),
   nextAction: z.string(),
+  fieldErrors: z
+    .array(z.strictObject({ field: z.string(), message: z.string() }))
+    .max(20)
+    .optional(),
 });
 export type ApiErrorDto = z.infer<typeof ApiErrorDtoSchema>;
 export const CompletionIssueSchema = z.strictObject({

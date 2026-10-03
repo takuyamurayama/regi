@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ActionIntents, inputFingerprint } from '../apps/web/src/action-intent';
-import { ApiError } from '../apps/web/src/api-response';
+import { ApiError, readApiResponse } from '../apps/web/src/api-response';
 
 function memory() {
   const values = new Map<string, string>();
@@ -97,6 +97,73 @@ void test('web unresolved intent rejects edits and replacement IDs and survives 
   );
   assert.equal(intents.pending(operation.scope)[0].id, id);
   await assert.rejects(() => intents.retry(id, 'different-store'), /元の店舗/);
+});
+
+void test('web unknown intent followed by validation rejection keeps its ID and guides saved-result recovery without editing', async () => {
+  for (const initialStatus of [undefined, 503]) {
+    const storage = memory();
+    const intents = new ActionIntents(storage);
+    const ids: string[] = [];
+    const committed = new Set<string>();
+    const fieldErrors = [{ field: 'reason', message: '理由を入力してください。' }];
+    const send = async (id: string) => {
+      ids.push(id);
+      committed.add(id);
+      if (ids.length === 1) throw new ApiError('response outcome unknown', initialStatus);
+      if (ids.length === 2)
+        return readApiResponse(
+          new Response(
+            JSON.stringify({
+              code: 'INVALID_INPUT',
+              message: '理由を入力してください。',
+              retryable: false,
+              nextAction: '該当項目を修正してから送信してください。',
+              fieldErrors,
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+      return id;
+    };
+    await assert.rejects(() => intents.run({ ...operation, send }), /response outcome unknown/);
+    const id = intents.pending(operation.scope)[0].id;
+    await assert.rejects(
+      () => intents.retry(id, operation.scope),
+      (error: unknown) => {
+        assert.ok(error instanceof ApiError);
+        assert.equal(error.status, 400);
+        assert.equal(error.code, 'INVALID_INPUT');
+        assert.equal(error.retryable, false);
+        assert.equal(error.uncertain, false);
+        assert.deepEqual(error.fieldErrors, fieldErrors);
+        assert.match(error.message, /未確認の操作.*保存結果/);
+        assert.match(error.message, /入力を変更せず/);
+        assert.doesNotMatch(error.message, /修正して|送信してください/);
+        assert.match(error.nextAction ?? '', /未確認の操作.*保存結果/);
+        return true;
+      },
+    );
+    assert.equal(intents.pending(operation.scope)[0].id, id);
+    assert.ok([...storage.values.values()].join('').includes(id));
+    await assert.rejects(
+      () =>
+        intents.run({
+          ...operation,
+          input: { amount: '600' },
+          send: () => Promise.resolve('never'),
+        }),
+      /先の操作/,
+    );
+    await assert.rejects(
+      () => intents.run({ ...operation, operationId: crypto.randomUUID(), send }),
+      /操作ID/,
+    );
+    assert.deepEqual(ids, [id, id]);
+    assert.equal(await intents.retry(id, operation.scope), id);
+    assert.deepEqual(ids, [id, id, id]);
+    assert.equal(committed.size, 1);
+    assert.equal(intents.pending(operation.scope).length, 0);
+  }
 });
 
 void test('web confirmed mutations stay successful after a read failure and permit explicit new operations', async () => {

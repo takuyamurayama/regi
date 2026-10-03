@@ -3,6 +3,7 @@ tests/api-read-contract.test.ts	HTTP document lists reject empty or malformed st
 tests/api-read-contract.test.ts	HTTP settings actor reflects authenticated staff and role instead of client supplied role or staff fields
 tests/api-response.test.ts	CloudFront HTML errors show cause and recovery instructions, never raw HTML or JSON parse errors
 tests/api-response.test.ts	business error messages retain next actions; general network failure does not assert the server is stopped
+tests/api-response.test.ts	input errors show Japanese field guidance without schema internals or retrying an unchanged invalid request
 tests/artifacts.test.ts	500明細でも全商品を一度ずつ出力し、各ページに表見出しとページ番号を付ける
 tests/artifacts.test.ts	宛名必須の適格請求書・日本時間の日付繰越・大きな整数金額を保持する
 tests/artifacts.test.ts	発注書は発行時点の数量・単価・仕入先を使い、未保存の税率を創作しない
@@ -42,6 +43,9 @@ tests/browser/finance-workflow.spec.ts	仕入画面で混在税率の下書き�
 tests/browser/finance-workflow.spec.ts	仕入画面は無効な数量と日本暦日を保持し未確定の原請求を0円確定として表示しない
 tests/browser/guild.spec.ts	白いモダン画面は光るAI装飾なしで実際の予測画面へ遷移する
 tests/browser/guild.spec.ts	白基調の画面で金額・説明・フォーム・実APIエラーを読める
+tests/browser/input-validation.spec.ts	AIの照会対象は日本語表示で選択でき、送信する集計キーは維持する
+tests/browser/input-validation.spec.ts	初回入力拒否は日本語で修正を案内し、修正した現金操作を一度だけ保存する
+tests/browser/input-validation.spec.ts	現金操作は開局未選択・理由未入力・不正金額を項目のそばで案内し送信しない
 tests/browser/operations.spec.ts	ダッシュボード画面を保存
 tests/browser/operations.spec.ts	二明細発注で第二明細だけ分納し、二明細売上の第二明細を返品する
 tests/browser/operations.spec.ts	商品登録 → 発注承認 → 発行 → 分納入荷 → 在庫表示
@@ -101,6 +105,7 @@ tests/finance-contracts.test.ts	finance input contracts reject client actor tena
 tests/finance-contracts.test.ts	finance money contracts reject JSON numbers negatives decimal notation and overlong inputs without losing big integers
 tests/finance-contracts.test.ts	finance original identities preserve spelling and require explicit unnumbered identification instead of inventing vendor numbers
 tests/finance-contracts.test.ts	finance tax classification accepts zero-rate reduced targets but rejects taxable values on non-taxable or out-of-scope lines
+tests/finance-contracts.test.ts	shared API error contract accepts optional Japanese field guidance while preserving legacy errors
 tests/finance-correction.test.ts	HTTP manager can create ordinary incomplete invoice draft but cannot create a financial correction from a voided invoice
 tests/finance-correction.test.ts	two HTTP connections create only one active correction draft and cancelled correction permits a new draft without original source rewriting
 tests/finance-exports.test.ts	HTTP finance PDF and evidence bundle capture immutable source and byte hashes before later master and payment changes
@@ -132,6 +137,9 @@ tests/finance-ui.test.ts	finance UI preserves actual event seconds so a return a
 tests/finance-ui.test.ts	finance UI preserves invalid quantity rate and money input until corrected and stores reduced classification explicitly
 tests/finance-ui.test.ts	finance UI saves an incomplete skeleton without inventing original dates or mutating the source snapshot
 tests/forecast-db.test.ts	real PostgreSQL forecast reads only complete days, persists seven days and rejects another store
+tests/input-validation.test.ts	HTTP invalid cash input returns actionable Japanese field errors without recording money, and corrected input succeeds
+tests/input-validation.test.ts	direct Zod validation uses safe field labels and preserves nonvalidation business errors
+tests/input-validation.test.ts	invalid sync business input remains a durable review with a sanitized message
 tests/migration.test.ts	000 role bootstrap requires a verifier, creates safe SCRAM login and rejects an unsafe existing role
 tests/migration.test.ts	empty database applies 000 through 007 with matching checksums and safe SCRAM app role
 tests/migration.test.ts	legacy version-only migration metadata adopts approved checksums without replaying facts
@@ -219,6 +227,7 @@ tests/web-intent.test.ts	web intent fingerprint excludes only top level PIN and 
 tests/web-intent.test.ts	web intent retries a lost response with the same ID and persists only recovery metadata
 tests/web-intent.test.ts	web logout discards a late acknowledged response and retains only unknown recovery metadata
 tests/web-intent.test.ts	web reloaded intent resumes the same ID and initial validation rejection permits correction
+tests/web-intent.test.ts	web unknown intent followed by validation rejection keeps its ID and guides saved-result recovery without editing
 tests/web-intent.test.ts	web unresolved intent rejects edits and replacement IDs and survives a later business rejection
 tests/web-rewrite.test.ts	sandbox web rewrite preserves API, health, assets, unknown paths and nonread methods
 tests/web-rewrite.test.ts	sandbox web rewrite serves every canonical UI path and invoice deep link without changing query scope

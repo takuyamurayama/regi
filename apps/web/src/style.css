@@ -1142,6 +1142,25 @@ label:has(> input[type='checkbox']) {
   margin-top: 5px;
   width: 100%;
 }
+.shift-actions {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.shift-actions > label {
+  display: grid;
+  flex: 1 1 180px;
+  gap: 6px;
+}
+.shift-actions small {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.shift-actions .field-error {
+  color: var(--negative);
+}
+.shift-actions [aria-invalid='true'] {
+  border-color: var(--negative);
+}
 .order {
   display: flex;
   justify-content: space-between;

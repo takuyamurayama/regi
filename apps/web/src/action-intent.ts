@@ -227,6 +227,22 @@ export class ActionIntents {
         if (!wasUnknown && caught instanceof ApiError && !caught.uncertain)
           this.intents.delete(intent.id);
         this.persist();
+        if (
+          wasUnknown &&
+          caught instanceof ApiError &&
+          caught.status === 400 &&
+          ['INVALID_INPUT', 'INVALID_REQUEST'].includes(caught.code ?? '')
+        ) {
+          const nextAction = '「未確認の操作」から保存結果を確認してください。';
+          throw new ApiError(
+            `先の操作が保存されたか確認できていません。入力を変更せず、${nextAction}`,
+            caught.status,
+            caught.code,
+            caught.retryable,
+            nextAction,
+            caught.fieldErrors,
+          );
+        }
         throw caught;
       })
       .finally(() => {

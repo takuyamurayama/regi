@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { networkError, readApiResponse } from '../apps/web/src/api-response';
+import { ApiError, networkError, readApiResponse } from '../apps/web/src/api-response';
 
 test('CloudFront HTML errors show cause and recovery instructions, never raw HTML or JSON parse errors', async () => {
   for (const status of [502, 503, 504])
@@ -54,4 +54,56 @@ test('business error messages retain next actions; general network failure does 
   );
   assert.ok(networkError().message.includes('ネットワーク接続'));
   assert.ok(!networkError().message.includes('停止中'));
+});
+
+void test('input errors show Japanese field guidance without schema internals or retrying an unchanged invalid request', async () => {
+  await assert.rejects(
+    () =>
+      readApiResponse(
+        new Response(
+          JSON.stringify({
+            code: 'INVALID_INPUT',
+            message: '入力内容を確認してください。',
+            retryable: false,
+            nextAction: '該当項目を修正してから送信してください。',
+            fieldErrors: [
+              { field: 'shiftId', message: '開局記録を選択してください。' },
+              { field: 'reason', message: '理由を入力してください。' },
+            ],
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof ApiError);
+      assert.equal(error.code, 'INVALID_INPUT');
+      assert.equal(error.uncertain, false);
+      assert.match(error.message, /開局記録を選択してください/);
+      assert.match(error.message, /理由を入力してください/);
+      assert.match(error.message, /修正/);
+      assert.doesNotMatch(error.message, /INVALID_INPUT|操作ID|invalid_format|uuid/);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () =>
+      readApiResponse(
+        new Response(
+          JSON.stringify({
+            code: 'INVALID_INPUT',
+            message:
+              '[{"origin":"string","code":"invalid_format","format":"uuid","path":["shiftId"],"message":"Invalid UUID"}]',
+            nextAction: '入力・同期状況を確認し、同じ操作IDで再試行してください。',
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof ApiError);
+      assert.match(error.message, /入力内容/);
+      assert.match(error.message, /修正/);
+      assert.doesNotMatch(error.message, /Invalid UUID|origin|uuid|操作ID/);
+      return true;
+    },
+  );
 });

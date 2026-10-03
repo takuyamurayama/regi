@@ -1,3 +1,8 @@
+export interface ApiFieldError {
+  field: string;
+  message: string;
+}
+
 export class ApiError extends Error {
   readonly uncertain: boolean;
   constructor(
@@ -6,6 +11,7 @@ export class ApiError extends Error {
     readonly code?: string,
     readonly retryable?: boolean,
     readonly nextAction?: string,
+    readonly fieldErrors: readonly ApiFieldError[] = [],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -33,6 +39,39 @@ export async function readApiResponse(response: Response) {
         'nextAction' in payload && typeof payload.nextAction === 'string'
           ? payload.nextAction
           : undefined;
+      if (response.status === 400 && ['INVALID_INPUT', 'INVALID_REQUEST'].includes(payload.code)) {
+        const fieldErrors: ApiFieldError[] = [];
+        if ('fieldErrors' in payload && Array.isArray(payload.fieldErrors)) {
+          const entries: unknown[] = payload.fieldErrors;
+          for (const item of entries.slice(0, 20)) {
+            if (
+              typeof item === 'object' &&
+              item !== null &&
+              'field' in item &&
+              typeof item.field === 'string' &&
+              'message' in item &&
+              typeof item.message === 'string'
+            )
+              fieldErrors.push({ field: item.field, message: item.message });
+          }
+        }
+        // Older servers may still return Zod's internal JSON; never show that to operators.
+        const message = fieldErrors.length
+          ? [...new Set(fieldErrors.map((entry) => entry.message))].join(' ')
+          : /[\u3040-\u30ff\u3400-\u9fff]/u.test(payload.message) &&
+              !/^\s*[[{]/u.test(payload.message)
+            ? payload.message
+            : '入力内容を確認してください。';
+        const guidance = '該当項目を修正してから送信してください。';
+        throw new ApiError(
+          `${message} ${guidance}`,
+          response.status,
+          payload.code,
+          false,
+          guidance,
+          fieldErrors,
+        );
+      }
       throw new ApiError(
         `${payload.code}: ${payload.message} ${nextAction ?? ''}`,
         response.status,

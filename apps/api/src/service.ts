@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { Actor, Database, rows, sql, Tx } from './db';
-import { BusinessError, requireRule } from './errors';
+import { BusinessError, inputValidationError, requireRule } from './errors';
 import {
   businessDate,
   calculate,
@@ -149,7 +149,7 @@ export const json = (value: any): string =>
   JSON.stringify(value, (_, entry) => (typeof entry === 'bigint' ? entry.toString() : entry));
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   const result = schema.safeParse(input);
-  requireRule(result.success, 'INVALID_INPUT', result.success ? '' : result.error.message, 400);
+  if (!result.success) throw inputValidationError(result.error);
   return result.data;
 }
 export function pinHash(pin: string, salt: string) {
