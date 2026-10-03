@@ -20,7 +20,7 @@ export REGI_KEYSTORE_PATH=/secure/location/regi-distribution.jks
 export REGI_KEYSTORE_PASSWORD=...  # 値は秘密管理ツールから供給
 export REGI_KEY_ALIAS=...
 export REGI_KEY_PASSWORD=...
-android/gradlew assembleRelease
+android/gradlew -p android assembleRelease
 ```
 
 署名鍵が未指定なら release は unsigned。debug APKを本番配布物と呼ばない。

@@ -1,1 +1,52 @@
-{"name":"regi","private":true,"workspaces":["apps/*","packages/*"],"scripts":{"build":"npm run build -w @regi/core && npm run build -w @regi/api && npm run build -w @regi/web","test":"tsx --test --test-concurrency=1 tests/*.test.ts","db:migrate":"tsx scripts/migrate.ts","db:seed":"tsx scripts/seed.ts","db:seed:sandbox":"tsx scripts/sandbox-seed.ts","dev:api":"npm run dev -w @regi/api","dev:web":"npm run dev -w @regi/web","test:web":"playwright test -c tests/playwright.config.ts"},"devDependencies":{"@types/node":"^22.0.0","tsx":"^4.20.0","typescript":"^5.9.0","@playwright/test":"^1.55.0"},"dependencies":{"@prisma/client":"6.19.0","prisma":"6.19.0"},"overrides":{"effect":"3.21.5","deepmerge-ts":"8.0.2","js-yaml":"5.4.2"}}
+{
+  "name": "regi",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @regi/core && npm run build -w @regi/api && npm run build -w @regi/web",
+    "lint": "tsx scripts/lint.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit -p tsconfig.lint.json",
+    "test": "tsx scripts/test-runner.ts all",
+    "test:unit": "tsx scripts/test-runner.ts unit",
+    "test:integration": "tsx scripts/test-runner.ts integration",
+    "test:manifest": "tsx scripts/test-manifest.ts",
+    "test:manifest:update": "tsx scripts/test-manifest.ts --write",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:seed:sandbox": "tsx scripts/sandbox-seed.ts",
+    "dev:api": "npm run dev -w @regi/api",
+    "dev:web": "npm run dev -w @regi/web",
+    "test:web": "playwright test -c tests/playwright.config.ts",
+    "test:web:manifest": "tsx scripts/browser-manifest.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "8.23.1",
+    "eslint": "9.39.5",
+    "prettier": "3.9.9",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "8.71.0"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.0",
+    "pg": "8.23.1",
+    "prisma": "6.19.0",
+    "tsx": "^4.20.0"
+  },
+  "engines": {
+    "node": ">=22.12.0 <25",
+    "npm": ">=10 <12"
+  },
+  "overrides": {
+    "effect": "3.21.5",
+    "deepmerge-ts": "8.0.2",
+    "js-yaml": "5.4.2"
+  }
+}

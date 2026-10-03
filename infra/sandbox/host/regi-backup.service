@@ -1,0 +1,9 @@
+[Unit]
+Description=Private REGI consistent PostgreSQL backup
+After=docker.service regi.service
+RequiresMountsFor=/var/lib/regi
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/regi
+ExecStart=/opt/regi/backup.sh --reason hourly
+TimeoutStartSec=260

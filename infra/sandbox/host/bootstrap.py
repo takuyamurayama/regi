@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import time
@@ -64,8 +65,34 @@ def authentication_environment(runtime):
     return environment
 
 
+def cognito_environment(runtime):
+    environment = {
+        "COGNITO_ISSUER": runtime["issuer"],
+        "COGNITO_CLIENT_ID": runtime["clientId"],
+        "COGNITO_ANDROID_CLIENT_ID": runtime.get("androidClientId", ""),
+    }
+    if any(not isinstance(value, str) for value in environment.values()):
+        raise ValueError("Cognito client configuration must be strings")
+    if not environment["COGNITO_ISSUER"] or not environment["COGNITO_CLIENT_ID"]:
+        raise ValueError("Cognito issuer and Web client are required")
+    return environment
+
+
+def backup_configuration(runtime):
+    bucket = runtime.get("backupBucket", "")
+    if not isinstance(bucket, str) or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", bucket):
+        raise ValueError("An explicit backup bucket is required")
+    if runtime.get("backupRegion") != "ap-northeast-1" or runtime.get("backupReplicaRegion") != "ap-northeast-3":
+        raise ValueError("Backup regions do not match the approved sandbox")
+    return {"backend": "compose", "database": "regi", "user": "regi_owner",
+            "hostDirectory": "/opt/regi", "privateDirectory": "/var/lib/regi/private/backups",
+            "backupBucket": bucket, "backupRegion": runtime["backupRegion"]}
+
+
 def bootstrap(config, runtime):
     authentication = authentication_environment(runtime)
+    cognito = cognito_environment(runtime)
+    backup_config = backup_configuration(runtime)
     stage("runtime-secret")
     directory = Path("/var/lib/regi/private")
     directory.mkdir(parents=True, exist_ok=True)
@@ -111,7 +138,7 @@ def bootstrap(config, runtime):
         import uuid
         scopes = [{"tenantId": demo["tenant_id"], "staffId": str(uuid.UUID(bytes=bytes(digest))), "role": "admin", "stores": [], "mfa": authentication["COGNITO_MFA_ENFORCED"] == "true"}]
     environment_file("/opt/regi/db.env", {"POSTGRES_USER": "regi_owner", "POSTGRES_PASSWORD": credentials["ownerPassword"], "POSTGRES_DB": "regi"})
-    environment_file("/opt/regi/app.env", {"NODE_ENV": "production", "DATABASE_URL": app_url, "RECOVERY_SIGNING_SECRET": credentials["recoveryKey"], "COGNITO_ISSUER": runtime["issuer"], "COGNITO_CLIENT_ID": runtime["clientId"], **authentication, "WEB_ORIGIN": runtime["webOrigin"], "AWS_REGION": "ap-northeast-1", "AWS_PROFILE": "sandbox-workload", "AWS_CONFIG_FILE": "/run/regi-aws/config", "AWS_SHARED_CREDENTIALS_FILE": "/run/regi-aws/not-present", "AWS_EC2_METADATA_DISABLED": "true", "ARTIFACT_BUCKET": runtime["bucket"], "EXPORT_QUEUE_URL": runtime["queueUrl"], "BEDROCK_PROFILE_ID": runtime["bedrockProfileArn"], "WORKER_SCOPES": json.dumps(scopes, separators=(",", ":"))})
+    environment_file("/opt/regi/app.env", {"NODE_ENV": "production", "DATABASE_URL": app_url, "RECOVERY_SIGNING_SECRET": credentials["recoveryKey"], **cognito, **authentication, "WEB_ORIGIN": runtime["webOrigin"], "AWS_REGION": "ap-northeast-1", "AWS_PROFILE": "sandbox-workload", "AWS_CONFIG_FILE": "/run/regi-aws/config", "AWS_SHARED_CREDENTIALS_FILE": "/run/regi-aws/not-present", "AWS_EC2_METADATA_DISABLED": "true", "ARTIFACT_BUCKET": runtime["bucket"], "EXPORT_QUEUE_URL": runtime["queueUrl"], "BEDROCK_PROFILE_ID": runtime["bedrockProfileArn"], "WORKER_SCOPES": json.dumps(scopes, separators=(",", ":"))})
     environment_file("/opt/regi/maintenance.env", {"NODE_ENV": "production", "DATABASE_URL": app_url, "MIGRATION_DATABASE_URL": owner_url, "REGI_SANDBOX_DB_BOOTSTRAP": "sandbox-only", "REGI_SANDBOX_DB_CONFIRM": "regi", "REGI_SANDBOX_APP_PASSWORD_FILE": "/run/regi-private/app-password", "REGI_SANDBOX_ADMIN_PIN_FILE": "/run/regi-private/admin-pin", "REGI_SANDBOX_SEED": "synthetic-only" if demo["enabled"] else "disabled", "REGI_SANDBOX_TENANT_ID": demo["tenant_id"], "REGI_SANDBOX_CONFIRM_TENANT": demo["tenant_id"], "REGI_SANDBOX_ADMIN_SUBJECT": demo["administrator_subject"], "REGI_SANDBOX_END_DAY": demo["end_day"], "RECOVERY_SIGNING_SECRET": credentials["recoveryKey"]})
     stage("database-ready")
     compose("up", "-d", "--wait", "db")
@@ -130,6 +157,13 @@ def bootstrap(config, runtime):
             compose("run", "--rm", "maintenance", "/opt/forecast/bin/python", "forecast/regi_forecast.py", "--tenant", demo["tenant_id"], "--store", str(uuid.UUID(bytes=bytes(digest))))
     stage("api-worker-start")
     compose("up", "-d", "api", "worker")
+    private_file("/opt/regi/backup.json", json.dumps(backup_config, sort_keys=True))
+    stage("backup-timer")
+    subprocess.run(["systemctl", "start", "regi-backup.timer"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    stage("startup-backup")
+    result = subprocess.run(["/opt/regi/backup.sh", "--reason", "startup"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if result.returncode:
+        print("REGI startup backup failed; inspect protected last-backup.json; hourly timer remains enabled", flush=True)
     stage("ready")
 
 

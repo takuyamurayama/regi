@@ -1,0 +1,8 @@
+.context/
+node_modules/
+**/dist/
+**/build/
+**/.terraform/
+docs/openapi.json
+**/docs/openapi.json
+tests/fixtures/money.json

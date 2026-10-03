@@ -22,9 +22,20 @@ aws_cli() { aws --profile "$profile" --region "$region" "$@"; }
 actual_account=$(aws_cli sts get-caller-identity --query Account --output text)
 if [ "$actual_account" != "$account" ]; then printf 'AWS account mismatch; refusing operation\n' >&2; exit 1; fi
 send_command() {
-  local parameters="$1" command_id
-  command_id=$(aws_cli ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript --timeout-seconds 60 --parameters "$parameters" --query 'Command.CommandId' --output text) || return 1
-  aws_cli ssm wait command-executed --command-id "$command_id" --instance-id "$instance"
+  local parameters="$1" command_id invocation_status deadline
+  command_id=$(AWS_MAX_ATTEMPTS=1 AWS_RETRY_MODE=standard aws_cli ssm send-command --instance-ids "$instance" --document-name AWS-RunShellScript --timeout-seconds 60 --parameters "$parameters" --query 'Command.CommandId' --output text --cli-connect-timeout 5 --cli-read-timeout 10) || return 1
+  if ! [[ "$command_id" =~ ^[0-9a-f-]{36}$ ]]; then return 1; fi
+  deadline=$((SECONDS + 480))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    invocation_status=$(AWS_MAX_ATTEMPTS=1 AWS_RETRY_MODE=standard aws_cli ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" --query Status --output text --cli-connect-timeout 5 --cli-read-timeout 10) || invocation_status=Pending
+    case "$invocation_status" in
+      Success) return 0 ;;
+      Cancelled|Cancelling|Failed|TimedOut|Undeliverable|Terminated) return 1 ;;
+      Pending|InProgress|Delayed) sleep 5 ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
 }
 case "$action" in
   start)
@@ -40,20 +51,22 @@ case "$action" in
     connected=false
     for attempt in $(seq 1 120); do
       if [ "$(aws_cli ssm describe-instance-information --filters "Key=InstanceIds,Values=$instance" --query 'InstanceInformationList[0].PingStatus' --output text)" = Online ]; then
-        if send_command '{"commands":["systemctl restart regi-autostop.timer","systemctl is-active --quiet regi-autostop.timer","systemctl start --no-block regi.service"]}'; then connected=true; break; fi
+        if send_command '{"executionTimeout":["420"],"commands":["systemctl restart regi-autostop.timer","systemctl is-active --quiet regi-autostop.timer","systemctl start --no-block regi.service"]}'; then connected=true; break; fi
       fi
       sleep 5
     done
     if [ "$connected" != true ]; then printf 'SSM unavailable; guest two-hour auto-stop remains enabled. Check host bootstrap.\n' >&2; exit 1; fi
     printf 'Started; auto-stop is reset to two hours. Private API may take several minutes to initialize.\n%s\n' "$url"
-    if command -v open >/dev/null 2>&1; then open "$url"; fi
+    if [ "$(uname -s)" = Darwin ] && command -v open >/dev/null 2>&1; then
+      open "$url" >/dev/null 2>&1 || printf 'Browser could not open; use the URL above.\n' >&2
+    fi
     ;;
   stop)
     state=$(aws_cli ec2 describe-instances --instance-ids "$instance" --query 'Reservations[0].Instances[0].State.Name' --output text)
     case "$state" in
       running|pending)
         if [ "$state" = pending ]; then aws_cli ec2 wait instance-running --instance-ids "$instance"; fi
-        send_command '{"commands":["systemctl stop regi.service"]}' || printf 'SSM shutdown unavailable; requesting normal guest OS shutdown, never forced stop.\n' >&2
+        send_command '{"executionTimeout":["420"],"commands":["systemctl stop regi.service","python3 -c '\''import json,datetime; p=\"/var/lib/regi/private/backups/last-backup.json\"; r=json.load(open(p)); age=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(r[\"created_at\"])).total_seconds(); ok=r.get(\"status\")==\"complete\" and r.get(\"reason\")==\"stop\" and 0<=age<=360; print(\"REGI stop backup complete\" if ok else \"REGI stop backup incomplete; inspect private record\"); raise SystemExit(0 if ok else 1)'\''"]}' || printf 'SSM shutdown or stop backup incomplete; inspect private backup record. Requesting normal guest OS shutdown, never forced stop.\n' >&2
         aws_cli ec2 stop-instances --instance-ids "$instance" --query 'StoppingInstances[0].CurrentState.Name' --output text
         aws_cli ec2 wait instance-stopped --instance-ids "$instance" ;;
       stopping) aws_cli ec2 wait instance-stopped --instance-ids "$instance" ;;

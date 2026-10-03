@@ -1,0 +1,15 @@
+[Unit]
+Description=Private REGI sandbox containers
+Requires=docker.service
+After=docker.service network-online.target
+RequiresMountsFor=/var/lib/regi
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/regi
+ExecStart=/opt/regi/bootstrap.sh
+ExecStop=/opt/regi/regi-stop.sh
+TimeoutStartSec=6600
+TimeoutStopSec=360
+[Install]
+WantedBy=multi-user.target

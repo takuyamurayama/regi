@@ -5,37 +5,43 @@ services:
       POSTGRES_USER: regi_owner
       POSTGRES_PASSWORD: local-owner-only
       POSTGRES_DB: regi
-    ports: ["127.0.0.1:5432:5432"]
-    volumes: ["postgres:/var/lib/postgresql/data", "./scripts/docker-init.sql:/docker-entrypoint-initdb.d/roles.sql:ro"]
+    ports: ['127.0.0.1:5432:5432']
+    volumes:
+      [
+        'postgres:/var/lib/postgresql/data',
+        './scripts/docker-init.sql:/docker-entrypoint-initdb.d/roles.sql:ro',
+      ]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U regi_owner -d regi"]
+      test: ['CMD-SHELL', 'pg_isready -U regi_owner -d regi']
       interval: 3s
       retries: 20
   migrate:
     build: .
-    command: ["npm", "run", "db:migrate"]
+    healthcheck: { disable: true }
+    command: ['npm', 'run', 'db:migrate']
     environment:
       DATABASE_URL: postgresql://regi_app:local-regi-only@db:5432/regi
       MIGRATION_DATABASE_URL: postgresql://regi_owner:local-owner-only@db:5432/regi
     depends_on:
-      db: {condition: service_healthy}
+      db: { condition: service_healthy }
   api:
     build: .
-    ports: ["3000:3000"]
+    ports: ['3000:3000']
     environment: &api_environment
       DATABASE_URL: postgresql://regi_app:local-regi-only@db:5432/regi
       NODE_ENV: development
-      REGI_DEV_AUTH: "true"
+      REGI_DEV_AUTH: 'true'
       JAPANESE_FONT: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      migrate: { condition: service_completed_successfully }
   worker:
     build: .
-    command: ["node", "apps/api/dist/apps/api/src/worker.js"]
+    healthcheck: { disable: true }
+    command: ['node', 'apps/api/dist/apps/api/src/worker.js']
     environment:
       <<: *api_environment
       WORKER_SCOPES: '[{"tenantId":"10000000-0000-4000-8000-000000000001","staffId":"30000000-0000-4000-8000-000000000001","role":"admin","stores":[],"mfa":true}]'
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      migrate: { condition: service_completed_successfully }
 volumes:
   postgres:

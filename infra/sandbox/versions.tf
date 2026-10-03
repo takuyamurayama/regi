@@ -10,6 +10,12 @@ provider "aws" {
   allowed_account_ids = [var.expected_account_id]
   default_tags { tags = { Project = var.name, Environment = "personal-sandbox", SyntheticDataOnly = "true" } }
 }
+provider "aws" {
+  alias               = "osaka"
+  region              = "ap-northeast-3"
+  allowed_account_ids = [var.expected_account_id]
+  default_tags { tags = { Project = var.name, Environment = "personal-sandbox", SyntheticDataOnly = "true" } }
+}
 data "aws_caller_identity" "current" {}
 data "aws_availability_zones" "available" {
   state            = "available"

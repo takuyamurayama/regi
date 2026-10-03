@@ -4,7 +4,7 @@ export NODE_ENV=test
 adb="${ANDROID_HOME:-$PWD/.context/android-sdk}/platform-tools/adb"
 fixture="$(npx tsx scripts/android-fixture.ts)"
 mkdir -p .context/verification
-android/gradlew assembleDebug assembleDebugAndroidTest --no-daemon -PregiRestartRunner=true
+android/gradlew -p android assembleDebug assembleDebugAndroidTest --no-daemon -PregiRestartRunner=true
 "$adb" install -r android/app/build/outputs/apk/debug/app-debug.apk
 "$adb" install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 "$adb" shell am instrument -w -e stage prepare -e regiTestFixture "'$fixture'" jp.regi.pos.test/jp.regi.pos.RestartRunner | tee .context/verification/android-restart-prepare.log

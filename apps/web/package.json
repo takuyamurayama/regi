@@ -1,1 +1,19 @@
-{"name":"@regi/web","version":"1.0.0","type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"tsc --noEmit && vite build"},"dependencies":{"@regi/core":"1.0.0","react":"^19.1.0","react-dom":"^19.1.0","vite":"^7.1.0"},"devDependencies":{"@types/react":"^19.1.0","@types/react-dom":"^19.1.0"}}
+{
+  "name": "@regi/web",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build"
+  },
+  "dependencies": {
+    "@regi/core": "1.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "vite": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0"
+  }
+}
