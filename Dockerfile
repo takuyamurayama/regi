@@ -4,7 +4,7 @@ COPY forecast/requirements.txt ./
 RUN python -m venv /opt/forecast \
     && /opt/forecast/bin/pip install --no-cache-dir -r requirements.txt
 
-FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS builder
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
@@ -17,7 +17,7 @@ RUN npm ci
 COPY . .
 RUN npx prisma generate --schema apps/api/prisma/schema.prisma && npm run build
 
-FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS runtime
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        openssl fonts-noto-cjk libgomp1 libbz2-1.0 libexpat1 libffi8 liblzma5 libsqlite3-0 \
