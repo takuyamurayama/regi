@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm@sha256:2333bd330d12de02514770b3585cad313644316047cdee24a7acfdece6de6efb AS python
+FROM python:3.15-slim-bookworm@sha256:122756f3fe72c4f5d3d71897888204ee85774bc79de952555b8a474e1d0a5d53 AS python
 WORKDIR /build
 COPY forecast/requirements.txt ./
 RUN python -m venv /opt/forecast \
