@@ -29,7 +29,7 @@
     "@playwright/test": "^1.55.0",
     "@types/node": "^22.0.0",
     "@types/pg": "8.23.1",
-    "eslint": "9.39.5",
+    "eslint": "10.11.0",
     "prettier": "3.9.9",
     "typescript": "^5.9.0",
     "typescript-eslint": "8.71.0"
